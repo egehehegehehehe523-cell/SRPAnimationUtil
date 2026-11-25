@@ -8,6 +8,7 @@ import net.minecraft.world.chunk.IChunkProvider;
 import net.minecraft.world.storage.SaveHandlerMP;
 import net.minecraft.world.storage.WorldInfo;
 import net.minecraft.world.WorldSettings;
+import net.minecraft.world.GameType;
 import net.minecraft.world.WorldType;
 import net.minecraft.profiler.Profiler;
 import org.objectweb.asm.ClassReader;
@@ -95,7 +96,7 @@ final class NativeStates {
 
     private static final class PreviewWorld extends World {
         PreviewWorld(){
-            super(new SaveHandlerMP(),new WorldInfo(new WorldSettings(0L,WorldSettings.GameType.CREATIVE,false,false,WorldType.DEFAULT),"SRP animation preview"),new WorldProviderSurface(),new Profiler(),true);
+            super(new SaveHandlerMP(),new WorldInfo(new WorldSettings(0L,GameType.CREATIVE,false,false,WorldType.DEFAULT),"SRP animation preview"),new WorldProviderSurface(),new Profiler(),true);
         }
         @Override protected IChunkProvider createChunkProvider(){return null;}
         @Override protected boolean isChunkLoaded(int x,int z,boolean allowEmpty){return false;}
