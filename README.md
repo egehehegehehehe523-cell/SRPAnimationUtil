@@ -1,8 +1,11 @@
-# SRP Animation Util (0.1.0 development prototype)
+# SRP Animation Util (0.1.1 development prototype)
 
-Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Client-only. No SRP code or assets are bundled.
+Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
 ## Workflow
+Open Tabula from a world, choose its normal Import Minecraft Model dialog, select a registered SRP entity model and confirm. The addon uses Tabula's ModelInfo (entity class, model class and texture) to discover and sample native animations, create a named rig and append editable clips in the same project. No mob needs to be spawned or targeted. Animated SRP imports always create a dedicated new local project instead of merging geometry into an unrelated model. Saved projects reopen unchanged. Non-SRP imports and remote/hosted sessions retain standard Tabula behavior. If sampling fails, the normal importer remains available.
+
+Optional manual recording for movements not represented by automatic sampling:
 1. Look directly at a parasite. F7 starts recording actual rendered native poses; F7 again stops. Keep the mob in view and let it perform the desired behavior. A recording is limited to 60 s and 120,000 joint samples.
 2. Alternatively F8 discovers numeric status branches from model bytecode using ASM source analysis and samples each on fresh model and unspawned preview entity instances. Both still and moving inputs are sampled; identical tracks are deduplicated. No live entity state is changed. Models without compatible constructors or shared status fields need live capture.
 3. Open the regular Tabula editor. F9 imports the pending captures into a new project, or appends clips to the selected compatible project without replacing existing clips. Open the regular Animate window and edit/add/split components, scrub, play and save the .tbl project. Bindings can be changed in Minecraft Controls.

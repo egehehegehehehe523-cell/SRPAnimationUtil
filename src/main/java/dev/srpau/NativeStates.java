@@ -92,12 +92,13 @@ final class NativeStates {
         final EntityLivingBase entity;
         final Method status;
         final Field still,aniTicks;
-        Preview(EntityLivingBase original) throws Exception {
-            Class<?> base=Class.forName(BASE,false,original.getClass().getClassLoader());
-            if(!base.isInstance(original))throw new IllegalArgumentException("Not an EntityParasiteBase");
-            Constructor<?> ctor=original.getClass().getDeclaredConstructor(World.class);
+        Preview(Class<?> entityClass, World world) throws Exception {
+            if(world==null)throw new IllegalArgumentException("Open Tabula from a world to sample animations");
+            Class<?> base=Class.forName(BASE,false,entityClass.getClassLoader());
+            if(!base.isAssignableFrom(entityClass))throw new IllegalArgumentException("Not an EntityParasiteBase");
+            Constructor<?> ctor=entityClass.getDeclaredConstructor(World.class);
             ctor.setAccessible(true);
-            entity=(EntityLivingBase)ctor.newInstance(original.world);
+            entity=(EntityLivingBase)ctor.newInstance(world);
             // No setPosition, NBT loading, world registration, update or network packets.
             status=base.getMethod("setParasiteStatus",int.class);
             still=base.getDeclaredField("still");still.setAccessible(true);

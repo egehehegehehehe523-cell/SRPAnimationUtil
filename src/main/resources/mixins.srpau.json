@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "compatibilityLevel": "JAVA_8",
+  "package": "dev.srpau.mixin",
+  "client": [
+    "WindowImportMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

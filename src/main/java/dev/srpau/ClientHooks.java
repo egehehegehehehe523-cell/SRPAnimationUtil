@@ -47,7 +47,7 @@ public final class ClientHooks {
         ClientRegistry.registerKeyBinding(bake);
         ClientRegistry.registerKeyBinding(append);
     }
-    private static void message(String text){
+    static void message(String text){
         LogManager.getLogger("SRPAnimationUtil").info(text);
         if(MC.player!=null)MC.player.sendMessage(new TextComponentString("[SRP Animator] "+text));
     }
@@ -123,23 +123,36 @@ public final class ClientHooks {
         if(!(renderer instanceof RenderLivingBase))throw new IllegalArgumentException("Unsupported renderer");
         ModelBase original=((RenderLivingBase)renderer).getMainModel();
         BufferedImage image=texture(renderer,mob);
-        java.lang.reflect.Constructor<?> ctor=original.getClass().getDeclaredConstructor();
+        BakeResult result=sampleNative(original.getClass(),mob.getClass(),mob.world,image,
+            MAX_PENDING-pending.size(),MAX_PENDING_SAMPLES-pendingSamples());
+        pending.addAll(result.clips);
+        message(result.summary()+". F9 in Tabula to import; F7 records exact live behavior.");
+    }
+
+    static final class BakeResult {
+        final SortedSet<Integer> states;
+        final List<Capture> clips=new ArrayList<>();
+        int failed;
+        boolean truncated;
+        BakeResult(SortedSet<Integer> states){this.states=states;}
+        String summary(){return "Discovered states "+states+"; baked "+clips.size()+" distinct clips, "+failed+" failed"+
+            (truncated?", sample budget reached":"");}
+    }
+
+    static BakeResult sampleNative(Class<? extends ModelBase> modelClass,Class<?> entityClass,
+            net.minecraft.world.World world,BufferedImage image,int maxClips,long maxSamples) throws Exception {
+        java.lang.reflect.Constructor<? extends ModelBase> ctor=modelClass.getDeclaredConstructor();
         ctor.setAccessible(true);
-        SortedSet<Integer> states=NativeStates.discover(original.getClass());
-        // Previews use isolated entities; if their constructor/state interface is unavailable,
-        // only the live recorder is offered rather than writing to the real mob.
-        List<Capture> batch=new ArrayList<>();
-        long used=pendingSamples();
-        int failed=0;
-        boolean truncated=false;
-        outer: for(int state:states){
+        BakeResult result=new BakeResult(NativeStates.discover(modelClass));
+        long used=0;
+        outer: for(int state:result.states){
             for(boolean idle:new boolean[]{true,false}){
-                if(pending.size()+batch.size()>=MAX_PENDING){truncated=true;break outer;}
+                if(result.clips.size()>=maxClips){result.truncated=true;break outer;}
                 try{
-                    NativeStates.Preview preview=new NativeStates.Preview(mob);
-                    ModelBase model=(ModelBase)ctor.newInstance();
+                    ModelBase model=ctor.newInstance();
                     Rig rig=new Rig(model);
-                    if(used+41L*rig.bones.size()>MAX_PENDING_SAMPLES){truncated=true;break outer;}
+                    if(used+41L*rig.bones.size()>maxSamples){result.truncated=true;break outer;}
+                    NativeStates.Preview preview=new NativeStates.Preview(entityClass,world);
                     String label=state==0?(idle?"Native idle sample":"Native walk sample"):
                         "Native status "+state+(idle?" (still)":" (moving)");
                     Capture clip=new Capture(rig,image,label);
@@ -151,18 +164,16 @@ public final class ClientHooks {
                         clip.add(t,rig.sample());
                     }
                     boolean duplicate=false;
-                    for(Capture other:batch)if(sameClip(clip,other)){duplicate=true;break;}
-                    if(!duplicate){batch.add(clip);used+=41L*rig.bones.size();}
+                    for(Capture other:result.clips)if(sameClip(clip,other)){duplicate=true;break;}
+                    if(!duplicate){result.clips.add(clip);used+=41L*rig.bones.size();}
                 }catch(Exception|LinkageError ex){
-                    failed++;
+                    result.failed++;
                     LogManager.getLogger("SRPAnimationUtil").warn("Could not preview native status "+state,ex);
-                    if(failed>=4 && batch.isEmpty())break outer;
+                    if(result.failed>=4 && result.clips.isEmpty())break outer;
                 }
             }
         }
-        pending.addAll(batch);
-        message("Discovered states "+states+"; baked "+batch.size()+" distinct clips, "+failed+" failed"+
-            (truncated?", sample budget reached":"")+". F9 in Tabula to import; F7 records exact live behavior.");
+        return result;
     }
     private static boolean sameClip(Capture a,Capture b){
         if(!a.rig.signature.equals(b.rig.signature)||!a.times.equals(b.times))return false;
@@ -205,7 +216,7 @@ public final class ClientHooks {
     @SubscribeEvent
     public void tabulaOverlay(GuiScreenEvent.DrawScreenEvent.Post e){
         if(!(e.getGui() instanceof GuiWorkspace))return;
-        String s="SRP Animator | "+pending.size()+" pending | "+Keyboard.getKeyName(append.getKeyCode())+": append/import";
+        String s="SRP Animator | automatic model import | "+pending.size()+" manual captures | "+Keyboard.getKeyName(append.getKeyCode())+": append";
         MC.fontRenderer.drawStringWithShadow(s,5,Math.max(2,e.getGui().height-12),0xFFAAEEFF);
     }
     private void importNext(GuiWorkspace workspace){
