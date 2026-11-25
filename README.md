@@ -1,2 +1,24 @@
-# SRPAnimationUtil
-A client-side Tabula 7.1.0 extension for SRP 1.10.9 and Minecraft 1.12.2. Development prototype; no SRP binaries are redistributed.
+# SRP Animation Util (0.1.0 development prototype)
+
+Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Client-only. No SRP code or assets are bundled.
+
+## Workflow
+1. Look directly at a parasite. F7 starts recording actual rendered native poses; F7 again stops. Keep the mob in view and let it perform the desired behavior. A recording is limited to 60 s and 120,000 joint samples.
+2. Alternatively F8 samples idle and walking inputs on a fresh instance of the native model. It does not change entity timers or force attacks; it evaluates the model against the current entity state. Models without a no-arg constructor need live capture.
+3. Open the regular Tabula editor. F9 imports the pending captures into a new project, or appends clips to the selected compatible project without replacing existing clips. Open the regular Animate window and edit/add/split components, scrub, play and save the .tbl project. Bindings can be changed in Minecraft Controls.
+4. Repeat to append other native movements. Pending captures are held in memory until imported; save projects before exiting.
+
+## Automatic support
+No entity class table. SRP entities are detected by their registry namespace; the live renderer supplies the actual model. Every ModelRenderer in the inherited box list and model fields is traversed, including unnamed/empty joints and multiple boxes. Stable names and a hierarchy/geometry fingerprint prevent cross-rig imports. Captures use native Tabula additive components with initial offsets followed by incremental position and rotation changes. Geometry/texture stay local.
+
+Live captures sample once per observed game tick; if the entity is culled or temporarily invisible, the missing interval is interpolated. Baked samples are two seconds at 20 ticks/second and are not guaranteed to be seamless loops. Rotations are degrees and translations use model pixels; native offsets are folded into the pivot at 1/16 model scale. Animation names are editable in Tabula. The warning in the 7.1.0 Animate window is suppressed while the addon is active (no disk config write).
+
+## Source audit
+The provided SRParasites-1.10.9.jar contains 158 top-level client/model/entity classes; 148 directly extend ModelSRP. ModelSRP exposes procedural swingX/Y/Z and moveY helpers; examples override the standard ModelBase rotation method. Native animations are not a standalone asset library. This is a generic pose recorder, not an automatic list of every attack/state. Renderer layers, custom OpenGL transforms, visibility, alternative submodels and unusual UV/inflate behavior are not yet represented. Shared/cyclic model parts are rejected rather than corrupted.
+
+Tabula 7.1.0 source: https://github.com/iChun/Tabula/tree/b53c4ed70a28c56562e8b8e0361df2ab0aa02fed
+iChunUtil 7.2.2 source: https://github.com/iChun/iChunUtil/tree/5cd18d371f70b798ceb3fabc6da4d72715322a88
+Both already contain Animation, AnimationComponent and GUI editing code. This extension uses their public APIs; no upstream source copied.
+
+## Build / limitations
+Run Gradle 8.8 with JDK 17 and JDK 8 toolchain, or use GitHub Actions. Exact CurseMaven dependencies pinned. This is the first implementation, not a verified 1.7 feature-parity restoration. Existing Tabula timeline bugs still require live investigation. No custom playback on actual gameplay entities or ExtinctionCore trigger integration yet: the current deliverable is capture, append and authoring inside Tabula. Test with Longarms, flying parasites, and an empty-joint/multi-box model first. Never distribute extracted models/textures without permission.
