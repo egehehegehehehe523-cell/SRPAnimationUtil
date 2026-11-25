@@ -112,6 +112,7 @@ final class Rig {
         for(int i=0;i<bones.size();i++){
             Bone bone=bones.get(i);CubeInfo joint=new CubeInfo(bone.name);
             joint.dimensions=new int[3];
+            joint.metadata.add("srpau:bone");
             joint.position=Arrays.copyOfRange(base[i],0,3);
             joint.rotation=Arrays.copyOfRange(base[i],3,6);
             joints.put(bone,joint);project.cubeCount++;

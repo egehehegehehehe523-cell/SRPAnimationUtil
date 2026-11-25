@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.2 development prototype)
+# SRP Animation Util (0.1.3 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -25,3 +25,8 @@ Both already contain Animation, AnimationComponent and GUI editing code. This ex
 
 ## Build / limitations
 Run Gradle 8.8 with JDK 17 and JDK 8 toolchain, or use GitHub Actions. Exact CurseMaven dependencies pinned. This is the first implementation, not a verified 1.7 feature-parity restoration. Existing Tabula timeline bugs still require live investigation. No custom playback on actual gameplay entities or ExtinctionCore trigger integration yet: the current deliverable is capture, append and authoring inside Tabula. Test with Longarms, flying parasites, and an empty-joint/multi-box model first. Never distribute extracted models/textures without permission.
+
+## Bone animation workspace (Animate in Tabula's top toolbar)
+For a local imported SRP rig, open Animate. This is an alternative editor inside the existing Tabula GUI, not a new screen session or project format. The left panel lists ordinary Tabula clips; the right panel lists joints only. Select a joint in the tree or click its stick-skeleton marker in the model viewport. Right drag orbits; wheel zooms; left drag on the selected joint edits the chosen local X/Y/Z transform channel. G/R/S selects move/rotate/scale; X/Y/Z selects axis. Numeric fields and +/- controls are also available. Set key commits the preview pose at the current tick to native AnimationComponent tracks. The timeline shows the selected bone's component boundaries, supports scrubbing, playback and optional looping. New creates a regular Tabula clip; Rename and +20t edit the clip; Apply returns to the same project, then use Tabula's normal Save/Save As. Cancel discards this editor's working copy. The native imported animation data is unchanged unless deliberately edited, including its original sampled poses and loop setting.
+
+Bone mode recognizes both old indexed imported joint names and the explicit srpau:bone metadata on new imports. Geometry is rendered but never selected or edited here. Its preview evaluates Tabula's own AnimationComponent interpolation, with hierarchical local transforms including scale. It uses the same model/texture, but a separate orthographic viewport rather than Blockbench's actual renderer. Stick preview means a selectable model skeleton, not a player attachment constraint. Imported samples still represent fixed native input sequences rather than a complete symbolic translation of SRP Java animation code. No artificial loop-closing or motion smoothing is applied. In-game runtime playback remains separate future work.

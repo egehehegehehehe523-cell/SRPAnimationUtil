@@ -1,3 +1,6 @@
 key.srpau.record=Record native parasite animation
 key.srpau.bake=Discover and bake native animation states
 key.srpau.append=Import pending animations into Tabula
+
+srpau.animate=Animate
+srpau.animate.short=A
