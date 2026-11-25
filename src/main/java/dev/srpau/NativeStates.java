@@ -3,6 +3,13 @@ package dev.srpau;
 import net.minecraft.client.model.ModelBase;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldProviderSurface;
+import net.minecraft.world.chunk.IChunkProvider;
+import net.minecraft.world.storage.SaveHandlerMP;
+import net.minecraft.world.storage.WorldInfo;
+import net.minecraft.world.WorldSettings;
+import net.minecraft.world.WorldType;
+import net.minecraft.profiler.Profiler;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
@@ -86,19 +93,29 @@ final class NativeStates {
         }
     }
 
+    private static final class PreviewWorld extends World {
+        PreviewWorld(){
+            super(new SaveHandlerMP(),new WorldInfo(new WorldSettings(0L,WorldSettings.GameType.CREATIVE,false,false,WorldType.DEFAULT),"SRP animation preview"),new WorldProviderSurface(),new Profiler(),true);
+        }
+        @Override protected IChunkProvider createChunkProvider(){return null;}
+        @Override protected boolean isChunkLoaded(int x,int z,boolean allowEmpty){return false;}
+    }
+
     /** Isolated instance: never inserted into the world, ticked or sent to the server.
      * Only the common SRP preview inputs are changed, never the user's real entity. */
     static final class Preview {
         final EntityLivingBase entity;
         final Method status;
         final Field still,aniTicks;
-        Preview(Class<?> entityClass, World world) throws Exception {
-            if(world==null)throw new IllegalArgumentException("Open Tabula from a world to sample animations");
+        Preview(Class<?> entityClass) throws Exception {
             Class<?> base=Class.forName(BASE,false,entityClass.getClassLoader());
             if(!base.isAssignableFrom(entityClass))throw new IllegalArgumentException("Not an EntityParasiteBase");
             Constructor<?> ctor=entityClass.getDeclaredConstructor(World.class);
             ctor.setAccessible(true);
-            entity=(EntityLivingBase)ctor.newInstance(world);
+            // Tabula itself uses a detached World with SaveHandlerMP when model discovery needs one.
+            // Never spawn or tick a preview in the real game world. Give constructors a valid
+            // WorldInfo and profiler, but no loaded chunks, server or disk save handler.
+            entity=(EntityLivingBase)ctor.newInstance(new PreviewWorld());
             // No setPosition, NBT loading, world registration, update or network packets.
             status=base.getMethod("setParasiteStatus",int.class);
             still=base.getDeclaredField("still");still.setAccessible(true);

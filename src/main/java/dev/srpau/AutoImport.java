@@ -27,7 +27,6 @@ public final class AutoImport {
         if(!(window.workspace instanceof GuiWorkspace))return false;
         GuiWorkspace workspace=(GuiWorkspace)window.workspace;
         if(workspace.remoteSession || workspace.host!=null)return false;
-        if(Minecraft.getMinecraft().world==null)return false;
         ModelInfo selected=null;
         for(ElementListTree.Tree tree:window.modelList.trees){
             if(tree.selected && tree.attachedObject instanceof ModelInfo){
@@ -39,6 +38,7 @@ public final class AutoImport {
         Class<? extends EntityLivingBase> entityClass=(Class<? extends EntityLivingBase>)selected.clz;
         ResourceLocation id=EntityList.getKey(entityClass);
         if(id==null||!id.toString().startsWith("srparasites:"))return false;
+        ClientHooks.message("Automatic import requested for "+id+" ("+selected.modelParent.getClass().getSimpleName()+"), "+(Minecraft.getMinecraft().world==null?"main menu":"in-world")+" workspace");
         boolean texture=true;
         for(Element control:window.elements)if(control.id==2&&control instanceof ElementToggle)
             texture=((ElementToggle)control).toggledState;
@@ -50,7 +50,7 @@ public final class AutoImport {
             Class<? extends ModelBase> modelClass=selected.modelParent.getClass();
             image=texture?readTexture(selected.texture):null;
             result=ClientHooks.sampleNative(modelClass,entityClass,
-                Minecraft.getMinecraft().world,image,24,120000);
+                image,24,120000);
             java.lang.reflect.Constructor<? extends ModelBase> ctor=modelClass.getDeclaredConstructor();
             ctor.setAccessible(true);
             Rig rig=new Rig(ctor.newInstance());

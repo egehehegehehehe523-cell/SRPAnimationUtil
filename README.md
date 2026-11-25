@@ -1,9 +1,9 @@
-# SRP Animation Util (0.1.1 development prototype)
+# SRP Animation Util (0.1.2 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
 ## Workflow
-Open Tabula from a world, choose its normal Import Minecraft Model dialog, select a registered SRP entity model and confirm. The addon uses Tabula's ModelInfo (entity class, model class and texture) to discover and sample native animations, create a named rig and append editable clips in the same project. No mob needs to be spawned or targeted. Animated SRP imports always create a dedicated new local project instead of merging geometry into an unrelated model. Saved projects reopen unchanged. Non-SRP imports and remote/hosted sessions retain standard Tabula behavior. If sampling fails, the normal importer remains available.
+Open Tabula directly from the main menu or from a world, choose its normal Import Minecraft Model dialog, select a registered SRP entity model and confirm. The addon uses Tabula's ModelInfo (entity class, model class and texture) to discover and sample native animations, create a named rig and append editable clips in the same project. No mob needs to be spawned or targeted, and no game world needs to be loaded. All automatic samples use a detached client preview World (no chunks, no disk saves, no server), based on Tabula’s own import-world fallback. The log reports the selected model and import result. Animated SRP imports always create a dedicated new local project instead of merging geometry into an unrelated model. Saved projects reopen unchanged. Non-SRP imports and remote/hosted sessions retain standard Tabula behavior. If sampling fails, the normal importer remains available.
 
 Optional manual recording for movements not represented by automatic sampling:
 1. Look directly at a parasite. F7 starts recording actual rendered native poses; F7 again stops. Keep the mob in view and let it perform the desired behavior. A recording is limited to 60 s and 120,000 joint samples.

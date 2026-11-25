@@ -123,7 +123,7 @@ public final class ClientHooks {
         if(!(renderer instanceof RenderLivingBase))throw new IllegalArgumentException("Unsupported renderer");
         ModelBase original=((RenderLivingBase)renderer).getMainModel();
         BufferedImage image=texture(renderer,mob);
-        BakeResult result=sampleNative(original.getClass(),mob.getClass(),mob.world,image,
+        BakeResult result=sampleNative(original.getClass(),mob.getClass(),image,
             MAX_PENDING-pending.size(),MAX_PENDING_SAMPLES-pendingSamples());
         pending.addAll(result.clips);
         message(result.summary()+". F9 in Tabula to import; F7 records exact live behavior.");
@@ -140,7 +140,7 @@ public final class ClientHooks {
     }
 
     static BakeResult sampleNative(Class<? extends ModelBase> modelClass,Class<?> entityClass,
-            net.minecraft.world.World world,BufferedImage image,int maxClips,long maxSamples) throws Exception {
+            BufferedImage image,int maxClips,long maxSamples) throws Exception {
         java.lang.reflect.Constructor<? extends ModelBase> ctor=modelClass.getDeclaredConstructor();
         ctor.setAccessible(true);
         BakeResult result=new BakeResult(NativeStates.discover(modelClass));
@@ -152,7 +152,7 @@ public final class ClientHooks {
                     ModelBase model=ctor.newInstance();
                     Rig rig=new Rig(model);
                     if(used+41L*rig.bones.size()>maxSamples){result.truncated=true;break outer;}
-                    NativeStates.Preview preview=new NativeStates.Preview(entityClass,world);
+                    NativeStates.Preview preview=new NativeStates.Preview(entityClass);
                     String label=state==0?(idle?"Native idle sample":"Native walk sample"):
                         "Native status "+state+(idle?" (still)":" (moving)");
                     Capture clip=new Capture(rig,image,label);
