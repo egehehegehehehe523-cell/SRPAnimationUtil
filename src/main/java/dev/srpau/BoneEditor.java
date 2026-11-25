@@ -43,14 +43,19 @@ final class BoneEditor {
     private Animation clip;
     private Node selected;
     private int frame,mode=1,axis=0,clipScroll,boneScroll;
-    private boolean playing,leftDown,rightDown,dragBone,dragTimeline,dirty,preview;
+    private boolean playing,leftDown,rightDown,dragTimeline,dirty,preview;
+    private boolean autoKey=true,gizmoChanged;
+    private TransformGizmo gizmo;
+    private TransformGizmo.Drag gizmoDrag;
+    private double[] dragOriginal;
+    private boolean dragOriginalPreview;
     private int lastX,lastY;
     private float pitch=15,yaw=-35,zoom=1;
     private double cx,cy,cz,extent=32,floorY=24;
     private double timelineZoom=1,timelineStart=0;
     private int timelineEnd, timelineTop;
     private double[] proposed;
-    private String status="Select a bone; G/R/S = move/rotate/scale; Set key commits.";
+    private String status="Select a bone, then drag its coloured handles.";
     private int w,h,left,right,top=43,bottom;
     private static final int BG=0xff1c1e24,PANEL=0xff25272e,EDGE=0xff383c47,FG=0xffe4e9f0,MUTED=0xffa2acbc,ACCENT=0xff6b96f7;
     private static final class Node {
@@ -128,12 +133,13 @@ final class BoneEditor {
         return n;
     }
     private void choose(Animation a){
+        finishGizmo(false);
         clip=a;frame=0;timelineStart=0;timelineZoom=1;playing=false;preview=false;proposed=null;
         name.setText(a==null?"":a.name);refreshFields();
     }
-    private void select(Node n){selected=n;preview=false;proposed=null;refreshFields();}
+    private void select(Node n){finishGizmo(false);selected=n;preview=false;proposed=null;refreshFields();}
     private int length(){return clip==null?40:Math.max(1,clip.getLength());}
-    private void seek(int t){frame=Math.max(0,Math.min(length(),t));playing=false;preview=false;proposed=null;refreshFields();}
+    private void seek(int t){finishGizmo(false);frame=Math.max(0,Math.min(length(),t));playing=false;preview=false;proposed=null;refreshFields();}
     void tick(){
         if(!playing||clip==null)return;
         if(frame>=length()){
@@ -157,8 +163,9 @@ final class BoneEditor {
         double[] v=channel(selected);
         for(int i=0;i<3;i++)values[i].setText(String.format(Locale.ROOT,"%.4f",v[i]));
     }
-    private void setMode(int m){mode=m;preview=false;proposed=null;refreshFields();}
+    private void setMode(int m){finishGizmo(false);mode=m;preview=false;proposed=null;refreshFields();}
     private void togglePlayback(){
+        finishGizmo(false);
         if(clip==null)return;
         if(!playing&&frame>=length())frame=0;
         playing=!playing;preview=false;proposed=null;refreshFields();
@@ -182,7 +189,7 @@ final class BoneEditor {
     private void keyframe(){
         if(selected==null||clip==null){status="Create or select a clip first.";return;}
         try{
-            double[] desired=readFields();
+            double[] desired=preview&&proposed!=null?proposed.clone():readFields();
             eval(selected,frame);double[] current=channel(selected),delta=new double[3];
             boolean changed=false;
             for(int i=0;i<3;i++){delta[i]=desired[i]-current[i];changed|=Math.abs(delta[i])>1e-7;}
@@ -322,7 +329,7 @@ final class BoneEditor {
         w=workspace.width;h=workspace.height;
         left=Math.min(200,Math.max(116,w*23/100));right=w-Math.min(175,Math.max(110,w/5));
         bottom=Math.max(top+85,h-Math.max(110,h*34/100));
-        controls.clear();hits.clear();
+        controls.clear();hits.clear();gizmo=null;
         Gui.drawRect(0,0,w,h,BG);
         Gui.drawRect(0,0,w,22,PANEL);
         Gui.drawRect(0,23,left,h,PANEL);Gui.drawRect(right,23,w,h,PANEL);
@@ -356,7 +363,7 @@ final class BoneEditor {
             button(94,y,16,16,"+",false,()->adjust(k,step()));
         }
         button(5,keyPanel+135,68,17,"Set key",preview,this::keyframe);
-        text("Parent / local axes",6,keyPanel+156,MUTED,left-12);
+        button(5,keyPanel+155,80,16,"Auto key",autoKey,()->autoKey=!autoKey);
         panelTitle("BONE",right,23,w-right);
         text(boneName(selected),right+6,46,FG,w-right-12);
         text("Pivot / parent transform",right+6,60,MUTED,w-right-12);
@@ -378,7 +385,7 @@ final class BoneEditor {
             controls.add(new Control(x+10,y,Math.max(0,w-x-10),13,()->select(n)));
         }
         checker();
-        renderModel(partial);
+        renderModel(partial,mx,my);
         button(left+4,25,27,15,"G",mode==0,()->setMode(0));
         button(left+34,25,27,15,"R",mode==1,()->setMode(1));
         button(left+64,25,27,15,"S",mode==2,()->setMode(2));
@@ -464,7 +471,7 @@ final class BoneEditor {
     private void input(int mx,int my,int ty,int tx,int tw){
         boolean l=Mouse.isButtonDown(0),r=Mouse.isButtonDown(1);
         int wheel=Mouse.getDWheel();
-        if(wheel!=0){
+        if(wheel!=0&&gizmoDrag==null){
             if(viewport(mx,my))zoom=(float)Math.max(.15,Math.min(8,zoom*Math.pow(1.12,wheel/120D)));
             else if(mx>=timelineX()&&mx<right&&my>=timelineTop){
                 double anchor=timelineStart+(mx-timelineX())*visibleTicks()/timelineWidth();
@@ -475,7 +482,7 @@ final class BoneEditor {
             else if(mx<left)clipScroll-=Integer.signum(wheel)*3;
             else if(mx>=right)boneScroll-=Integer.signum(wheel)*3;
         }
-        if(r&&rightDown&&viewport(mx,my)){yaw+=(mx-lastX)*.6F;pitch=Math.max(-89,Math.min(89,pitch+(my-lastY)*.6F));}
+        if(gizmoDrag==null&&r&&rightDown&&viewport(mx,my)){yaw+=(mx-lastX)*.6F;pitch=Math.max(-89,Math.min(89,pitch+(my-lastY)*.6F));}
         if(l&&!leftDown){
             boolean field=name.mouseClicked(mx,my,0);for(GuiTextField v:values)field|=v.mouseClicked(mx,my,0);
             for(GuiTextField f:attachmentFields){if(attachedBone!=null&&attachmentSettings)field|=f.mouseClicked(mx,my,0);else f.setFocused(false);}
@@ -483,25 +490,26 @@ final class BoneEditor {
                 boolean clicked=false;
                 for(Control c:controls)if(c.contains(mx,my)){c.action.run();clicked=true;break;}
                 if(!clicked&&mx>=tx&&mx<right&&my>=ty&&my<timelineEnd){dragTimeline=true;seek(timeAt(mx));}
-                else if(!clicked&&viewport(mx,my)){
+                else if(!clicked&&viewport(mx,my)&&!beginGizmo(mx,my)){
                     Node best=null;double depth=Double.NEGATIVE_INFINITY;
                     for(CubeHit hit:hits){double z=hit.depthAt(mx,my);if(z>depth){depth=z;best=hit.owner;}}
-                    if(best!=null){if(best!=selected)select(best);else dragBone=true;}
-                    else select(null);
+                    if(best!=selected)select(best);
                 }
             }
         }else if(l&&leftDown){
             if(dragTimeline)seek(timeAt(mx));
-            if(dragBone&&mx!=lastX)adjust(axis,(mx-lastX)*step()*.15);
+            if(gizmoDrag!=null)updateGizmo(mx,my);
         }
-        if(!l){dragTimeline=false;dragBone=false;}
+        if(!l){dragTimeline=false;finishGizmo(true);}
         leftDown=l;rightDown=r;lastX=mx;lastY=my;
     }
     void key(char c,int k){
         if(k==Keyboard.KEY_ESCAPE){
+            if(gizmoDrag!=null){finishGizmo(false);return;}
             if(dirty){status="Use Apply & back, or Cancel twice to discard.";}else BoneEditorEvents.close();
             return;
         }
+        if(gizmoDrag!=null)return;
         if(attachedBone!=null&&attachmentSettings)for(GuiTextField f:attachmentFields)if(f.isFocused()){
             if(k==Keyboard.KEY_RETURN){try{readAttachment();}catch(RuntimeException ignored){}refreshAttachmentFields();f.setFocused(false);}
             else if(f.textboxKeyTyped(c,k))try{readAttachment();}catch(RuntimeException ignored){}
@@ -541,7 +549,7 @@ final class BoneEditor {
         return Mat.scale(1D/validScale(project.scale[0]),1D/validScale(project.scale[1]),1D/validScale(project.scale[2]));
     }
     private static double validScale(double s){return Double.isFinite(s)&&Math.abs(s)>1e-6?s:1;}
-    private void renderModel(float partial){
+    private void renderModel(float partial,int mx,int my){
         if(right<=left||bottom<=top)return;
         float time=frame+(playing&&frame<length()?Math.max(0,Math.min(1,partial)):0);
         double size=Math.min(right-left,bottom-top)*.72/extent*zoom;
@@ -571,6 +579,7 @@ final class BoneEditor {
             GlStateManager.enableCull();GlStateManager.color(1,1,1,1);
         }
             drawOutline();
+            drawGizmo(mx,my);
             drawAxes();
         }finally{GL11.glDisable(GL11.GL_SCISSOR_TEST);}
     }
@@ -615,6 +624,102 @@ final class BoneEditor {
     private boolean descendant(Node root,Node target){
         if(root==target)return true;for(Node child:root.children)if(descendant(child,target))return true;return false;
     }
+    private static double[] axisVector(Mat m,int axis){
+        double[] origin=m.point(0,0,0);
+        return TransformGizmo.sub(m.point(axis==0?1:0,axis==1?1:0,axis==2?1:0),origin);
+    }
+    private void makeGizmo(Mat parent,CubeInfo p){
+        Mat pivot=parent.mul(Mat.translate(p.position[0],p.position[1],p.position[2]));
+        Mat z=pivot.mul(Mat.rz(p.rotation[2]));
+        Mat y=z.mul(Mat.ry(p.rotation[1]));
+        Mat x=y.mul(Mat.rx(p.rotation[0]));
+        gizmo=new TransformGizmo(mode,pivot.point(0,0,0));
+        for(int a=0;a<3;a++){
+            if(mode==TransformGizmo.ROTATE){
+                // Actual Euler derivative axes for T * Rz * Ry * Rx * S:
+                // X follows Z and Y, Y follows Z, Z is in parent space.
+                Mat basis=a==0?y:a==1?z:pivot;
+                gizmo.ring(a,axisVector(basis,(a+1)%3),axisVector(basis,(a+2)%3));
+            }else{
+                gizmo.axis(a,axisVector(mode==TransformGizmo.MOVE?pivot:x,a));
+            }
+        }
+    }
+    private static final int[] GIZMO_COLORS={0xffe34d50,0xff85df53,0xff5b83ff};
+    private void drawGizmo(int mx,int my){
+        if(gizmo==null)return;
+        TransformGizmo.Pick hover=viewport(mx,my)?gizmo.pick(mx,my):null;
+        GlStateManager.disableDepth();GlStateManager.disableTexture2D();
+        try{
+            for(TransformGizmo.Handle handle:gizmo.handles){
+                int a=handle.axis;
+                boolean active=gizmoDrag!=null&&gizmoDrag.axis==a;
+                boolean hovered=gizmoDrag==null&&hover!=null&&hover.handle.axis==a;
+                int c=active||hovered?0xffffdf75:GIZMO_COLORS[a];
+                GlStateManager.color(((c>>16)&255)/255F,((c>>8)&255)/255F,(c&255)/255F,1F);
+                GL11.glLineWidth(active||hovered?3F:1.8F);
+                GL11.glBegin(GL11.GL_LINE_STRIP);
+                for(double[] v:handle.points)GL11.glVertex2d(v[0],v[1]);
+                GL11.glEnd();
+                if(mode!=TransformGizmo.ROTATE){
+                    double[] o=handle.points[0],e=handle.points[1];
+                    double dx=e[0]-o[0],dy=e[1]-o[1],n=Math.hypot(dx,dy);
+                    dx/=n;dy/=n;
+                    if(mode==TransformGizmo.MOVE){
+                        GL11.glBegin(GL11.GL_TRIANGLES);
+                        GL11.glVertex2d(e[0]+dx*4,e[1]+dy*4);
+                        GL11.glVertex2d(e[0]-dx*7-dy*4,e[1]-dy*7+dx*4);
+                        GL11.glVertex2d(e[0]-dx*7+dy*4,e[1]-dy*7-dx*4);
+                        GL11.glEnd();
+                    }else{
+                        GL11.glBegin(GL11.GL_QUADS);
+                        GL11.glVertex2d(e[0]-3,e[1]-3);GL11.glVertex2d(e[0]+3,e[1]-3);
+                        GL11.glVertex2d(e[0]+3,e[1]+3);GL11.glVertex2d(e[0]-3,e[1]+3);
+                        GL11.glEnd();
+                    }
+                }
+            }
+            GlStateManager.color(.9F,.92F,.96F,1F);
+            GL11.glPointSize(4F);GL11.glBegin(GL11.GL_POINTS);
+            GL11.glVertex2d(gizmo.origin[0],gizmo.origin[1]);GL11.glEnd();GL11.glPointSize(1F);
+        }finally{
+            GL11.glLineWidth(1F);GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
+        }
+    }
+    private boolean beginGizmo(int mx,int my){
+        if(gizmo==null||selected==null||clip==null)return false;
+        TransformGizmo.Pick pick=gizmo.pick(mx,my);
+        if(pick==null)return false;
+        if(playing){playing=false;refreshFields();}
+        dragOriginalPreview=preview;
+        eval(selected,frame);
+        dragOriginal=(preview&&proposed!=null?proposed:channel(selected)).clone();
+        proposed=dragOriginal.clone();
+        gizmoDrag=new TransformGizmo.Drag(gizmo,pick,mx,my);
+        axis=pick.handle.axis;gizmoChanged=false;preview=true;
+        return true;
+    }
+    private void updateGizmo(int mx,int my){
+        if(gizmoDrag==null)return;
+        double delta=gizmoDrag.delta(mx,my);
+        if(!Double.isFinite(delta)||Math.abs(delta)<1e-8)return;
+        int a=gizmoDrag.axis;
+        double next=proposed[a]+delta;
+        proposed[a]=Math.max(mode==TransformGizmo.SCALE?.01:-100000,Math.min(100000,next));
+        gizmoChanged=true;
+        for(int i=0;i<3;i++)values[i].setText(String.format(Locale.ROOT,"%.4f",proposed[i]));
+    }
+    private void finishGizmo(boolean commit){
+        if(gizmoDrag==null)return;
+        gizmoDrag=null;
+        if(!commit){
+            preview=dragOriginalPreview;proposed=preview?dragOriginal.clone():null;
+            if(preview)for(int i=0;i<3;i++)values[i].setText(String.format(Locale.ROOT,"%.4f",proposed[i]));
+            else refreshFields();
+        }else if(gizmoChanged&&autoKey)keyframe();
+        else if(!gizmoChanged){preview=dragOriginalPreview;proposed=preview?dragOriginal.clone():null;}
+        gizmoChanged=false;dragOriginal=null;
+    }
     private void drawAxes(){
         int x=right-28,y=bottom-30;
         Mat m=Mat.rx(pitch).mul(Mat.ry(yaw));
@@ -633,6 +738,7 @@ final class BoneEditor {
         if(n==selected&&preview&&proposed!=null)System.arraycopy(proposed,0,channel(n),0,3);
         CubeInfo p=n.pose;
         Mat local=parent.mul(Mat.local(p));
+        if(n==selected&&!p.hidden)makeGizmo(parent,p);
         if(n.bone)owner=n;
         GlStateManager.pushMatrix();
         try{

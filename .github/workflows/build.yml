@@ -18,6 +18,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.8'
+      - name: Test transform gizmo math
+        run: |
+          mkdir -p /tmp/srpau-gizmo-test
+          javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/TransformGizmo.java tests/TransformGizmoTest.java
+          java -cp /tmp/srpau-gizmo-test dev.srpau.TransformGizmoTest
       - run: JAVA_HOME="$JAVA_HOME_17_X64" gradle --no-daemon build
       - uses: actions/upload-artifact@v4
         with:
