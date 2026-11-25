@@ -36,6 +36,10 @@ final class BoneEditor {
     private final ModelBase mesh=new ModelBase(){};
     private final GuiTextField name;
     private final GuiTextField[] values=new GuiTextField[3];
+    private final GuiTextField[] attachmentFields=new GuiTextField[3];
+    private final PlayerAttachment playerDummy=new PlayerAttachment();
+    private Node attachedBone;
+    private boolean attachmentVisible=true,attachmentRotation=false,attachmentSettings=false;
     private Animation clip;
     private Node selected;
     private int frame,mode=1,axis=0,clipScroll,boneScroll;
@@ -100,6 +104,8 @@ final class BoneEditor {
         if(bones.isEmpty())throw new IllegalArgumentException("No imported joints found");
         name=new GuiTextField(0,font,0,0,120,16);name.setMaxStringLength(80);
         for(int i=0;i<3;i++){values[i]=new GuiTextField(i+1,font,0,0,47,16);values[i].setMaxStringLength(18);}
+        for(int i=0;i<3;i++){attachmentFields[i]=new GuiTextField(10+i,font,0,0,47,16);attachmentFields[i].setMaxStringLength(18);}
+        refreshAttachmentFields();
         selected=null;
         if(!project.anims.isEmpty())choose(project.anims.get(0));else refreshFields();
         fit();
@@ -252,6 +258,63 @@ final class BoneEditor {
         for(int y=top;y<bottom;y+=cell)for(int x=left;x<right;x+=cell)
             if(((x-left)/cell+(y-top)/cell)%2==0)Gui.drawRect(x,y,Math.min(right,x+cell),Math.min(bottom,y+cell),0xff1e2026);
     }
+    private double[] attachmentChannel(){return attachmentRotation?playerDummy.rotation:playerDummy.position;}
+    private void refreshAttachmentFields(){
+        double[] v=attachmentChannel();
+        for(int i=0;i<3;i++)attachmentFields[i].setText(String.format(Locale.ROOT,"%.3f",v[i]));
+    }
+    private void attachPlayer(){
+        if(selected==null){status="Select a bone to attach the player.";return;}
+        attachedBone=selected;attachmentVisible=true;attachmentSettings=h>=400;playerDummy.reset();refreshAttachmentFields();
+        status="Player attached to "+boneName(attachedBone)+" (preview only).";
+    }
+    private void detachPlayer(){
+        attachedBone=null;for(GuiTextField f:attachmentFields)f.setFocused(false);
+        status="Player preview detached.";
+    }
+    private void readAttachment(){
+        double[] next=new double[3];
+        for(int i=0;i<3;i++){
+            next[i]=Double.parseDouble(attachmentFields[i].getText());
+            if(!Double.isFinite(next[i])||Math.abs(next[i])>100000)throw new IllegalArgumentException("Invalid offset");
+        }
+        System.arraycopy(next,0,attachmentChannel(),0,3);
+    }
+    private void adjustAttachment(int axis,int direction){
+        double[] v=attachmentChannel();
+        v[axis]+=direction*(attachmentRotation?5D:.5D);refreshAttachmentFields();
+    }
+    private int attachmentPanel(){
+        int width=w-right;
+        panelTitle("PLAYER ATTACHMENT",right,80,width);
+        button(right+5,101,Math.max(45,width-10),16,attachedBone==null?"Attach player":"Attach to selection",false,this::attachPlayer);
+        if(attachedBone==null)return 123;
+        text("On: "+boneName(attachedBone),right+5,121,FG,width-10);
+        button(right+5,134,48,16,attachmentVisible?"Hide":"Show",attachmentVisible,()->attachmentVisible=!attachmentVisible);
+        button(right+56,134,49,16,"Detach",false,this::detachPlayer);
+        button(right+5,153,Math.max(45,width-10),16,attachmentSettings?"Collapse settings":"Adjust attachment",attachmentSettings,()->{attachmentSettings=!attachmentSettings;for(GuiTextField f:attachmentFields)f.setFocused(false);});
+        if(!attachmentSettings)return 173;
+        button(right+5,172,48,16,"Offset",!attachmentRotation,()->{attachmentRotation=false;refreshAttachmentFields();});
+        button(right+56,172,49,16,"Rotate",attachmentRotation,()->{attachmentRotation=true;refreshAttachmentFields();});
+        for(int i=0;i<3;i++){
+            final int k=i;int y=192+i*18;
+            text("XYZ".substring(i,i+1),right+5,y+4,MUTED,12);
+            attachmentFields[i].x=right+18;attachmentFields[i].y=y;attachmentFields[i].drawTextBox();
+            button(right+68,y,16,16,"-",false,()->adjustAttachment(k,-1));
+            button(right+87,y,16,16,"+",false,()->adjustAttachment(k,1));
+        }
+        button(right+5,248,20,16,"-",false,()->playerDummy.size=Math.max(.1,playerDummy.size-.1));
+        text(String.format(Locale.ROOT,"%.1fx",playerDummy.size),right+29,252,FG,42);
+        button(right+65,248,20,16,"+",false,()->playerDummy.size=Math.min(10,playerDummy.size+.1));
+        button(right+5,267,48,16,"Reset",false,()->{playerDummy.reset();refreshAttachmentFields();});
+        button(right+56,267,49,16,"Copy",false,()->{
+            net.minecraft.client.gui.GuiScreen.setClipboardString(
+                "bone="+attachedBone.base.name+"; id="+attachedBone.base.identifier+
+                "; offset="+Arrays.toString(playerDummy.position)+"; rotation="+Arrays.toString(playerDummy.rotation)+"; scale="+playerDummy.size);
+            status="Attachment parameters copied (model pixels / degrees).";
+        });
+        return 289;
+    }
     private void panelTitle(String title,int x,int y,int width){
         Gui.drawRect(x,y,x+width,y+17,0xff292c34);text(title,x+6,y+5,MUTED,width-12);
     }
@@ -297,13 +360,14 @@ final class BoneEditor {
         panelTitle("BONE",right,23,w-right);
         text(boneName(selected),right+6,46,FG,w-right-12);
         text("Pivot / parent transform",right+6,60,MUTED,w-right-12);
-        panelTitle("OUTLINER",right,80,w-right);
+        int outlinerTop=attachmentPanel();
+        panelTitle("OUTLINER",right,outlinerTop,w-right);
         List<Node> visible=new ArrayList<>();
         for(Node root:roots)visibleBones(root,visible);
-        int boneRows=Math.max(1,(h-106)/14);
+        int boneRows=Math.max(0,(h-outlinerTop-22)/14);
         boneScroll=Math.max(0,Math.min(boneScroll,Math.max(0,visible.size()-boneRows)));
         for(int i=boneScroll;i<visible.size()&&i<boneScroll+boneRows;i++){
-            Node n=visible.get(i);int y=102+(i-boneScroll)*14,x=right+5+Math.min(6,n.depth)*6;
+            Node n=visible.get(i);int y=outlinerTop+22+(i-boneScroll)*14,x=right+5+Math.min(6,n.depth)*6;
             if(n==selected)Gui.drawRect(right,y,w,y+13,0xff414955);
             if(hasBoneChildren(n)){
                 text(collapsed.contains(n)?">":"v",x,y+3,MUTED,8);
@@ -414,6 +478,7 @@ final class BoneEditor {
         if(r&&rightDown&&viewport(mx,my)){yaw+=(mx-lastX)*.6F;pitch=Math.max(-89,Math.min(89,pitch+(my-lastY)*.6F));}
         if(l&&!leftDown){
             boolean field=name.mouseClicked(mx,my,0);for(GuiTextField v:values)field|=v.mouseClicked(mx,my,0);
+            for(GuiTextField f:attachmentFields){if(attachedBone!=null&&attachmentSettings)field|=f.mouseClicked(mx,my,0);else f.setFocused(false);}
             if(!field){
                 boolean clicked=false;
                 for(Control c:controls)if(c.contains(mx,my)){c.action.run();clicked=true;break;}
@@ -435,6 +500,11 @@ final class BoneEditor {
     void key(char c,int k){
         if(k==Keyboard.KEY_ESCAPE){
             if(dirty){status="Use Apply & back, or Cancel twice to discard.";}else BoneEditorEvents.close();
+            return;
+        }
+        if(attachedBone!=null&&attachmentSettings)for(GuiTextField f:attachmentFields)if(f.isFocused()){
+            if(k==Keyboard.KEY_RETURN){try{readAttachment();}catch(RuntimeException ignored){}refreshAttachmentFields();f.setFocused(false);}
+            else if(f.textboxKeyTyped(c,k))try{readAttachment();}catch(RuntimeException ignored){}
             return;
         }
         if(name.isFocused()){if(k==Keyboard.KEY_RETURN){rename();name.setFocused(false);}else name.textboxKeyTyped(c,k);return;}
@@ -582,6 +652,7 @@ final class BoneEditor {
                     hits.add(new CubeHit(owner,corners));
                 }
             }
+            if(!p.hidden&&n==attachedBone&&attachmentVisible)playerDummy.render(textured);
             if(!p.hidden)for(Node c:n.children)renderNode(c,local,owner,time,textured);
         }finally{GlStateManager.popMatrix();}
     }

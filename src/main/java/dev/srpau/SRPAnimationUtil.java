@@ -4,7 +4,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 
-@Mod(modid="srpanimationutil", name="SRP Animation Util", version="0.1.4",
+@Mod(modid="srpanimationutil", name="SRP Animation Util", version="0.1.5",
     clientSideOnly=true, acceptedMinecraftVersions="[1.12.2]",
     acceptableRemoteVersions="*", dependencies="required-after:tabula;required-after:ichunutil;required-after:srparasites")
 public final class SRPAnimationUtil {
@@ -13,6 +13,6 @@ public final class SRPAnimationUtil {
         ClientHooks hooks=new ClientHooks();
         MinecraftForge.EVENT_BUS.register(hooks);
         MinecraftForge.EVENT_BUS.register(new BoneEditorEvents());
-        org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("SRP Animation Util 0.1.4 initialized; automatic Tabula import enabled for main-menu and in-world local workspaces.");
+        org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("SRP Animation Util 0.1.5 initialized; automatic Tabula import enabled for main-menu and in-world local workspaces.");
     }
 }
