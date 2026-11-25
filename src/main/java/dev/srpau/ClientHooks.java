@@ -40,6 +40,8 @@ public final class ClientHooks {
     private long started=-1;
     private boolean recording,appendDown;
     private final List<Capture> pending=new ArrayList<>();
+    private static final int MAX_PENDING=24;
+    private static final long MAX_PENDING_SAMPLES=240000;
     public ClientHooks(){
         ClientRegistry.registerKeyBinding(record);
         ClientRegistry.registerKeyBinding(bake);
@@ -77,7 +79,7 @@ public final class ClientHooks {
                 if(recording){stop("Recording finished");continue;}
                 target=lookedAt();
                 if(target==null){message("Look directly at an SRP mob first.");continue;}
-                if(pending.size()>=12){message("Import pending captures into Tabula first.");continue;}
+                if(pending.size()>=MAX_PENDING || pendingSamples()>=MAX_PENDING_SAMPLES){message("Import pending captures into Tabula first.");continue;}
                 recording=true;started=-1;
                 message("Recording native pose; keep mob visible. F7 again to finish.");
             }
@@ -104,38 +106,69 @@ public final class ClientHooks {
             long elapsed=target.world.getTotalWorldTime()-started;
             if(elapsed<0||elapsed>1200){stop("Capture time limit");return;}
             if(!live.times.isEmpty() && elapsed<=live.times.get(live.times.size()-1))return;
+            if(pendingSamples()+(long)(live.frames.size()+1)*live.rig.bones.size()>MAX_PENDING_SAMPLES){stop("Pending sample limit");return;}
             live.add((int)elapsed,live.rig.sample());
             if(elapsed>=1200)stop("Capture time limit");
         }catch(Exception|LinkageError ex){
             stop("Recording stopped");failed("Native capture",ex);
         }
     }
+    private long pendingSamples(){
+        long n=0;for(Capture c:pending)n+=(long)c.frames.size()*c.rig.bones.size();return n;
+    }
     @SuppressWarnings({"rawtypes","unchecked"})
     private void bake(EntityLivingBase mob) throws Exception {
-        if(pending.size()>10){message("Import pending captures first.");return;}
+        if(pending.size()>=MAX_PENDING){message("Import pending captures first.");return;}
         Render renderer=MC.getRenderManager().getEntityRenderObject(mob);
         if(!(renderer instanceof RenderLivingBase))throw new IllegalArgumentException("Unsupported renderer");
         ModelBase original=((RenderLivingBase)renderer).getMainModel();
         BufferedImage image=texture(renderer,mob);
+        java.lang.reflect.Constructor<?> ctor=original.getClass().getDeclaredConstructor();
+        ctor.setAccessible(true);
+        SortedSet<Integer> states=NativeStates.discover(original.getClass());
+        // Previews use isolated entities; if their constructor/state interface is unavailable,
+        // only the live recorder is offered rather than writing to the real mob.
         List<Capture> batch=new ArrayList<>();
-        // The original entity is a read-only input; never tick it or change its synced state.
-        // Fresh model for each sequence, so native calls cannot alter the renderer's shared model.
-        for(int kind=0;kind<2;kind++){
-            java.lang.reflect.Constructor<?> ctor=original.getClass().getDeclaredConstructor();
-            ctor.setAccessible(true);
-            ModelBase model=(ModelBase)ctor.newInstance();
-            Rig rig=new Rig(model);
-            Capture clip=new Capture(rig,image,kind==0?"Native idle sample":"Native walk sample");
-            for(int t=0;t<=40;t++){
-                float swing=kind==0?0F:t*.65F,amount=kind==0?0F:1F;
-                model.setLivingAnimations(mob,swing,amount,0F);
-                model.setRotationAngles(swing,amount,mob.ticksExisted+t,0F,0F,.0625F,mob);
-                clip.add(t,rig.sample());
+        long used=pendingSamples();
+        int failed=0;
+        boolean truncated=false;
+        outer: for(int state:states){
+            for(boolean idle:new boolean[]{true,false}){
+                if(pending.size()+batch.size()>=MAX_PENDING){truncated=true;break outer;}
+                try{
+                    NativeStates.Preview preview=new NativeStates.Preview(mob);
+                    ModelBase model=(ModelBase)ctor.newInstance();
+                    Rig rig=new Rig(model);
+                    if(used+41L*rig.bones.size()>MAX_PENDING_SAMPLES){truncated=true;break outer;}
+                    String label=state==0?(idle?"Native idle sample":"Native walk sample"):
+                        "Native status "+state+(idle?" (still)":" (moving)");
+                    Capture clip=new Capture(rig,image,label);
+                    for(int t=0;t<=40;t++){
+                        preview.configure(state,idle,t);
+                        float swing=idle?0F:t*.65F,amount=idle?0F:1F;
+                        model.setLivingAnimations(preview.entity,swing,amount,0F);
+                        model.setRotationAngles(swing,amount,t,0F,0F,.0625F,preview.entity);
+                        clip.add(t,rig.sample());
+                    }
+                    boolean duplicate=false;
+                    for(Capture other:batch)if(sameClip(clip,other)){duplicate=true;break;}
+                    if(!duplicate){batch.add(clip);used+=41L*rig.bones.size();}
+                }catch(Exception|LinkageError ex){
+                    failed++;
+                    LogManager.getLogger("SRPAnimationUtil").warn("Could not preview native status "+state,ex);
+                    if(failed>=4 && batch.isEmpty())break outer;
+                }
             }
-            batch.add(clip);
         }
         pending.addAll(batch);
-        message("Baked two native input sequences. F9 in Tabula imports them; state-dependent attacks should be recorded with F7.");
+        message("Discovered states "+states+"; baked "+batch.size()+" distinct clips, "+failed+" failed"+
+            (truncated?", sample budget reached":"")+". F9 in Tabula to import; F7 records exact live behavior.");
+    }
+    private static boolean sameClip(Capture a,Capture b){
+        if(!a.rig.signature.equals(b.rig.signature)||!a.times.equals(b.times))return false;
+        for(int f=0;f<a.frames.size();f++)for(int j=0;j<a.rig.bones.size();j++)
+            for(int k=0;k<6;k++)if(Math.abs(a.frames.get(f)[j][k]-b.frames.get(f)[j][k])>1e-6)return false;
+        return true;
     }
     private static BufferedImage texture(Render<?> renderer,Entity entity){
         // MCP and SRG names: reflection is done only at capture/bake start.
