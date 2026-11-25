@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.5 development prototype)
+# SRP Animation Util (0.1.6 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -33,3 +33,5 @@ Bone mode recognizes both old indexed imported joint names and the explicit srpa
 
 ## Player attachment preview
 Select a parasite bone (click its cube or use the outliner), then click Attach player in the right sidebar. A vanilla Steve reference model attaches at its torso centre to the selected bone's evaluated local transform, including all ancestor rotations, translations and scale. It follows the bone while scrubbing, playing, or editing the animation, even if another bone is selected. Attach to selection rebinds it and resets the offsets. Adjust attachment opens local XYZ position (model pixels) and rotation (degrees), a reference size multiplier, reset and copy controls. Hide/show and detach are independent of animation editing. The dummy is not pickable, and never adds geometry, bones, animation channels, or data to the .tbl project. Copy puts the bone identifier and offsets on the clipboard for future runtime integration. Preview state is session-only. The player is 32 model pixels tall by default; renderer-specific SRP scaling is not inferred, so use the size control if needed to match actual in-game proportions. This is a preview, not a gameplay grab implementation.
+
+The Animate toolbar button now uses Tabula's native textured button type with a blue-only transparent icon, a tooltip and a separate hitbox. The local toolbar reflows on resize to reserve the animation slot; narrow layouts compact the right text controls and, if necessary, the icon row.
