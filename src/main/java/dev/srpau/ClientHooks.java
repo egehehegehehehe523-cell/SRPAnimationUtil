@@ -215,7 +215,7 @@ public final class ClientHooks {
     }
     @SubscribeEvent
     public void tabulaOverlay(GuiScreenEvent.DrawScreenEvent.Post e){
-        if(!(e.getGui() instanceof GuiWorkspace))return;
+        if(BoneEditorEvents.isOpen()||!(e.getGui() instanceof GuiWorkspace))return;
         String s="SRP Animator | automatic model import | "+pending.size()+" manual captures | "+Keyboard.getKeyName(append.getKeyCode())+": append";
         MC.fontRenderer.drawStringWithShadow(s,5,Math.max(2,e.getGui().height-12),0xFFAAEEFF);
     }

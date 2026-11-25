@@ -24,6 +24,7 @@ public final class BoneEditorEvents {
         catch(Exception|LinkageError e){LogManager.getLogger("SRPAnimationUtil").warn("Cannot open bone editor",e);ClientHooks.message("Cannot open bone editor; see latest.log.");}
     }
     static void close(){active=null;}
+    static boolean isOpen(){return active!=null;}
     @SubscribeEvent(priority=EventPriority.HIGHEST)
     public void draw(GuiScreenEvent.DrawScreenEvent.Pre e){
         if(active==null || e.getGui()!=active.workspace)return;

@@ -30,7 +30,8 @@ final class BoneEditor {
     private final Minecraft mc=Minecraft.getMinecraft();
     private final FontRenderer font=mc.fontRenderer;
     private final List<Node> roots=new ArrayList<>(),bones=new ArrayList<>();
-    private final List<Hit> hits=new ArrayList<>();
+    private final List<CubeHit> hits=new ArrayList<>();
+    private final Set<Node> collapsed=Collections.newSetFromMap(new IdentityHashMap<Node,Boolean>());
     private final List<Control> controls=new ArrayList<>();
     private final ModelBase mesh=new ModelBase(){};
     private final GuiTextField name;
@@ -38,14 +39,16 @@ final class BoneEditor {
     private Animation clip;
     private Node selected;
     private int frame,mode=1,axis=0,clipScroll,boneScroll;
-    private boolean playing,sticks=true,leftDown,rightDown,dragBone,dragTimeline,dirty,preview;
+    private boolean playing,leftDown,rightDown,dragBone,dragTimeline,dirty,preview;
     private int lastX,lastY;
     private float pitch=15,yaw=-35,zoom=1;
-    private double cx,cy,cz,extent=32;
+    private double cx,cy,cz,extent=32,floorY=24;
+    private double timelineZoom=1,timelineStart=0;
+    private int timelineEnd, timelineTop;
     private double[] proposed;
     private String status="Select a bone; G/R/S = move/rotate/scale; Set key commits.";
     private int w,h,left,right,top=43,bottom;
-    private static final int BG=0xff20242b,PANEL=0xff2b3039,EDGE=0xff414955,FG=0xffe4e9f0,MUTED=0xffa2acbc,ACCENT=0xff72b5ff;
+    private static final int BG=0xff1c1e24,PANEL=0xff25272e,EDGE=0xff383c47,FG=0xffe4e9f0,MUTED=0xffa2acbc,ACCENT=0xff6b96f7;
     private static final class Node {
         final CubeInfo base,pose;
         final List<Node> children=new ArrayList<>();
@@ -57,9 +60,30 @@ final class BoneEditor {
             pose=new CubeInfo(base.name);
         }
     }
-    private static final class Hit {
-        final Node node;final double x,y,z;
-        Hit(Node node,double[] p){this.node=node;x=p[0];y=p[1];z=p[2];}
+    // Project the actual animated cuboid, not the joint's pivot. Depth is interpolated
+    // on its faces, so overlapping geometry selects the frontmost owning joint.
+    private static final int[][] FACES={{0,2,3,1},{4,5,7,6},{0,1,5,4},{2,6,7,3},{0,4,6,2},{1,3,7,5}};
+    private static final int[][] EDGES={{0,1},{0,2},{0,4},{1,3},{1,5},{2,3},{2,6},{3,7},{4,5},{4,6},{5,7},{6,7}};
+    private static final class CubeHit {
+        final Node owner;
+        final double[][] points;
+        CubeHit(Node owner,double[][] points){this.owner=owner;this.points=points;}
+        double depthAt(double x,double y){
+            double best=Double.NEGATIVE_INFINITY;
+            for(int[] f:FACES){
+                best=Math.max(best,triangle(points[f[0]],points[f[1]],points[f[2]],x,y));
+                best=Math.max(best,triangle(points[f[0]],points[f[2]],points[f[3]],x,y));
+            }
+            return best;
+        }
+        static double triangle(double[] a,double[] b,double[] c,double x,double y){
+            double det=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
+            if(Math.abs(det)<1e-8)return Double.NEGATIVE_INFINITY;
+            double u=((b[1]-c[1])*(x-c[0])+(c[0]-b[0])*(y-c[1]))/det;
+            double v=((c[1]-a[1])*(x-c[0])+(a[0]-c[0])*(y-c[1]))/det;
+            double t=1-u-v;
+            return Math.min(u,Math.min(v,t))>=-1e-6?u*a[2]+v*b[2]+t*c[2]:Double.NEGATIVE_INFINITY;
+        }
     }
     private static final class Control{
         final int x,y,w,h;final Runnable action;
@@ -76,7 +100,7 @@ final class BoneEditor {
         if(bones.isEmpty())throw new IllegalArgumentException("No imported joints found");
         name=new GuiTextField(0,font,0,0,120,16);name.setMaxStringLength(80);
         for(int i=0;i<3;i++){values[i]=new GuiTextField(i+1,font,0,0,47,16);values[i].setMaxStringLength(18);}
-        selected=bones.get(0);
+        selected=null;
         if(!project.anims.isEmpty())choose(project.anims.get(0));else refreshFields();
         fit();
         leftDown=Mouse.isButtonDown(0);rightDown=Mouse.isButtonDown(1);
@@ -98,7 +122,7 @@ final class BoneEditor {
         return n;
     }
     private void choose(Animation a){
-        clip=a;frame=0;playing=false;preview=false;proposed=null;
+        clip=a;frame=0;timelineStart=0;timelineZoom=1;playing=false;preview=false;proposed=null;
         name.setText(a==null?"":a.name);refreshFields();
     }
     private void select(Node n){selected=n;preview=false;proposed=null;refreshFields();}
@@ -122,7 +146,7 @@ final class BoneEditor {
     }
     private double[] channel(Node n){return mode==0?n.pose.position:mode==1?n.pose.rotation:n.pose.scale;}
     private void refreshFields(){
-        if(selected==null)return;
+        if(selected==null){for(GuiTextField v:values)v.setText("");return;}
         eval(selected,frame);
         double[] v=channel(selected);
         for(int i=0;i<3;i++)values[i].setText(String.format(Locale.ROOT,"%.4f",v[i]));
@@ -213,73 +237,163 @@ final class BoneEditor {
         controls.add(new Control(x,y,width,height,action));
     }
     private void text(String s,int x,int y,int color,int max){font.drawString(font.trimStringToWidth(s,Math.max(0,max)),x,y,color);}
+    private String boneName(Node n){return n==null?"No bone selected":n.base.name.replaceFirst("^[0-9]{4,}_","");}
+    private void visibleBones(Node n,List<Node> result){
+        if(n.bone)result.add(n);
+        if(!collapsed.contains(n))for(Node c:n.children)visibleBones(c,result);
+    }
+    private boolean hasBoneChildren(Node n){
+        for(Node c:n.children)if(c.bone||hasBoneChildren(c))return true;
+        return false;
+    }
+    private void checker(){
+        Gui.drawRect(left,top,right,bottom,0xff191b20);
+        int cell=10;
+        for(int y=top;y<bottom;y+=cell)for(int x=left;x<right;x+=cell)
+            if(((x-left)/cell+(y-top)/cell)%2==0)Gui.drawRect(x,y,Math.min(right,x+cell),Math.min(bottom,y+cell),0xff1e2026);
+    }
+    private void panelTitle(String title,int x,int y,int width){
+        Gui.drawRect(x,y,x+width,y+17,0xff292c34);text(title,x+6,y+5,MUTED,width-12);
+    }
     void draw(int mx,int my,float partial){
-        w=workspace.width;h=workspace.height;left=Math.min(142,Math.max(100,w/5));right=w-left;bottom=h-88;
-        controls.clear();hits.clear();lines.clear();
+        w=workspace.width;h=workspace.height;
+        left=Math.min(200,Math.max(116,w*23/100));right=w-Math.min(175,Math.max(110,w/5));
+        bottom=Math.max(top+85,h-Math.max(110,h*34/100));
+        controls.clear();hits.clear();
         Gui.drawRect(0,0,w,h,BG);
-        Gui.drawRect(0,0,w,22,PANEL);Gui.drawRect(0,23,left,bottom,PANEL);Gui.drawRect(right,23,w,bottom,PANEL);
+        Gui.drawRect(0,0,w,22,PANEL);
+        Gui.drawRect(0,23,left,h,PANEL);Gui.drawRect(right,23,w,h,PANEL);
+        Gui.drawRect(left,23,right,top,0xff262932);
         text("SRP | ANIMATE",6,7,ACCENT,105);
-        button(Math.max(112,w-144),3,72,16,"Apply & back",false,this::apply);
-        button(w-68,3,64,16,"Cancel",false,()->{if(!dirty)BoneEditorEvents.close();else if(status.equals("Cancel again to discard all changes."))BoneEditorEvents.close();else status="Cancel again to discard all changes.";});
+        button(w-144,3,72,16,"Apply & back",false,this::apply);
+        button(w-68,3,64,16,"Cancel",false,()->{if(!dirty||status.equals("Cancel again to discard all changes."))BoneEditorEvents.close();else status="Cancel again to discard all changes.";});
         text(dirty?"Unsaved edits":"Native Tabula project",115,7,MUTED,Math.max(0,w-265));
-        text("ANIMATIONS",5,28,FG,left-10);text("BONES",right+5,28,FG,left-10);
-        int rows=Math.max(1,(bottom-47)/14);
+        panelTitle("ANIMATIONS",0,23,left);
+        button(5,43,24,16,"+",false,this::newClip);
+        button(32,43,45,16,"Rename",false,this::rename);
+        button(80,43,32,16,"Loop",clip!=null&&clip.loops,()->{if(clip!=null){clip.loops=!clip.loops;dirty=true;}});
+        int keyPanel=Math.max(102,Math.min(h-172,h*48/100));
+        int rows=Math.max(1,(keyPanel-64)/16);
         clipScroll=Math.max(0,Math.min(clipScroll,Math.max(0,project.anims.size()-rows)));
         for(int i=clipScroll;i<project.anims.size()&&i<clipScroll+rows;i++){
-            Animation a=project.anims.get(i);int y=44+(i-clipScroll)*14;
-            if(a==clip)Gui.drawRect(3,y,left-3,y+13,0xff375573);
-            text(a.name,6,y+2,FG,left-12);
-            controls.add(new Control(3,y,left-6,13,()->choose(a)));
+            Animation a=project.anims.get(i);int y=63+(i-clipScroll)*16;
+            if(a==clip)Gui.drawRect(0,y,left,y+15,0xff414955);
+            text((a==clip?"> ":"  ")+a.name,6,y+4,FG,left-12);
+            controls.add(new Control(0,y,left,15,()->choose(a)));
         }
-        boneScroll=Math.max(0,Math.min(boneScroll,Math.max(0,bones.size()-rows)));
-        for(int i=boneScroll;i<bones.size()&&i<boneScroll+rows;i++){
-            Node n=bones.get(i);int y=44+(i-boneScroll)*14,x=right+5+Math.min(4,n.depth)*5;
-            if(n==selected)Gui.drawRect(right+3,y,w-3,y+13,0xff375573);
-            text(n.base.name,x,y+2,n==selected?ACCENT:FG,w-x-4);
-            controls.add(new Control(right+3,y,left-6,13,()->select(n)));
+        panelTitle("KEYFRAME",0,keyPanel,left);
+        name.x=5;name.y=keyPanel+21;name.drawTextBox();
+        text(boneName(selected),6,keyPanel+43,FG,left-12);
+        text(modeName()+"  |  Tick "+frame,6,keyPanel+56,MUTED,left-12);
+        for(int i=0;i<3;i++){
+            final int k=i;int y=keyPanel+70+i*21;
+            button(5,y,16,16,"XYZ".substring(i,i+1),axis==i,()->axis=k);
+            values[i].x=24;values[i].y=y;values[i].drawTextBox();
+            button(75,y,16,16,"-",false,()->adjust(k,-step()));
+            button(94,y,16,16,"+",false,()->adjust(k,step()));
         }
-        // Same source geometry and native Tabula keyframe evaluator, orthographic camera.
+        button(5,keyPanel+135,68,17,"Set key",preview,this::keyframe);
+        text("Parent / local axes",6,keyPanel+156,MUTED,left-12);
+        panelTitle("BONE",right,23,w-right);
+        text(boneName(selected),right+6,46,FG,w-right-12);
+        text("Pivot / parent transform",right+6,60,MUTED,w-right-12);
+        panelTitle("OUTLINER",right,80,w-right);
+        List<Node> visible=new ArrayList<>();
+        for(Node root:roots)visibleBones(root,visible);
+        int boneRows=Math.max(1,(h-106)/14);
+        boneScroll=Math.max(0,Math.min(boneScroll,Math.max(0,visible.size()-boneRows)));
+        for(int i=boneScroll;i<visible.size()&&i<boneScroll+boneRows;i++){
+            Node n=visible.get(i);int y=102+(i-boneScroll)*14,x=right+5+Math.min(6,n.depth)*6;
+            if(n==selected)Gui.drawRect(right,y,w,y+13,0xff414955);
+            if(hasBoneChildren(n)){
+                text(collapsed.contains(n)?">":"v",x,y+3,MUTED,8);
+                controls.add(new Control(x,y,10,13,()->{if(!collapsed.add(n))collapsed.remove(n);}));
+            }
+            Gui.drawRect(x+11,y+4,x+19,y+10,0xff88b6db);
+            text(boneName(n),x+22,y+3,n==selected?ACCENT:FG,w-x-24);
+            controls.add(new Control(x+10,y,Math.max(0,w-x-10),13,()->select(n)));
+        }
+        checker();
         renderModel(partial);
-        button(left+4,25,44,15,"Sticks",sticks,()->sticks=!sticks);
-        button(left+51,25,29,15,"Fit",false,this::fit);
-        text("RMB orbit | wheel zoom",left+83,28,MUTED,right-left-86);
-        Gui.drawRect(0,bottom,w,h,PANEL);
-        int y=bottom+3;
-        button(4,y,38,16,"New",false,this::newClip);
-        name.x=45;name.y=y;name.drawTextBox();
-        int x=168;
-        button(x,y,44,16,"Rename",false,this::rename);x+=47;
-        button(x,y,37,16,playing?"Pause":"Play",playing,this::togglePlayback);x+=40;
-        button(x,y,34,16,"Loop",clip!=null&&clip.loops,()->{if(clip!=null){clip.loops=!clip.loops;dirty=true;}});x+=37;
-        button(x,y,37,16,"+20t",false,()->{if(clip!=null&&length()<1200){duration(clip,length()+20);dirty=true;}});x+=40;
-        text("Tick "+frame+" / "+length(),x,y+4,FG,w-x-4);
-        int ty=bottom+25,tx=10,tw=Math.max(1,w-20);
-        Gui.drawRect(tx,ty,tx+tw,ty+17,0xff181c23);
-        for(int t=0;t<=length();t+=Math.max(1,(int)Math.ceil(length()/12D))){
-            int px=tx+(int)(tw*t/(double)length());Gui.drawRect(px,ty,px+1,ty+17,EDGE);text(""+t,px+2,ty+2,MUTED,30);
+        button(left+4,25,27,15,"G",mode==0,()->setMode(0));
+        button(left+34,25,27,15,"R",mode==1,()->setMode(1));
+        button(left+64,25,27,15,"S",mode==2,()->setMode(2));
+        button(left+95,25,29,15,"Fit",false,this::fit);
+        text("Parent",left+129,29,MUTED,right-left-133);
+        text("RMB orbit | wheel zoom",left+5,bottom-12,MUTED,right-left-10);
+        drawTimeline();
+        text(status,5,h-11,MUTED,left-10);
+        input(mx,my,timelineTop,timelineX(),timelineWidth());
+    }
+    private int timelineX(){return left+Math.min(100,Math.max(65,(right-left)/4));}
+    private int timelineWidth(){return Math.max(1,right-timelineX()-5);}
+    private double visibleTicks(){return Math.max(4,Math.max(40,length())/timelineZoom);}
+    private double maxTimelineStart(){return Math.max(0,length()-visibleTicks());}
+    private void clampTimeline(){timelineStart=Math.max(0,Math.min(maxTimelineStart(),timelineStart));}
+    private int timeX(double t){return timelineX()+(int)Math.round((t-timelineStart)*timelineWidth()/visibleTicks());}
+    private int timeAt(int x){return (int)Math.round(timelineStart+(x-timelineX())*visibleTicks()/timelineWidth());}
+    private static boolean changed(double[] a){for(double v:a)if(Math.abs(v)>1e-7)return true;return false;}
+    private static boolean hasChannel(AnimationComponent c,int channel){
+        return channel==0?changed(c.posChange)||changed(c.posOffset):channel==1?changed(c.rotChange)||changed(c.rotOffset):changed(c.scaleChange)||changed(c.scaleOffset);
+    }
+    private void diamond(int x,int y,int color){
+        Gui.drawRect(x,y-3,x+1,y+4,color);Gui.drawRect(x-1,y-2,x+2,y+3,color);Gui.drawRect(x-2,y-1,x+3,y+2,color);Gui.drawRect(x-3,y,x+4,y+1,color);
+    }
+    private void drawTimeline(){
+        Gui.drawRect(left,bottom,right,h,0xff202229);
+        panelTitle("TIMELINE",left,bottom,right-left);
+        int y=bottom+19,mid=(left+right)/2;
+        button(mid-44,y,24,15,"|<",false,()->seek(0));
+        button(mid-17,y,34,15,playing?"Pause":">",playing,this::togglePlayback);
+        button(mid+20,y,24,15,">|",false,()->seek(length()));
+        button(left+4,y,40,15,"+20t",false,()->{if(clip!=null&&length()<1200){duration(clip,Math.min(1200,length()+20));dirty=true;}});
+        text(String.format(Locale.ROOT,"%.2fs / %.2fs",frame/20D,length()/20D),Math.max(left+46,right-91),y+4,FG,88);
+        timelineTop=bottom+39;
+        timelineEnd=h-15;
+        int tx=timelineX(),tw=timelineWidth(),ty=timelineTop;
+        clampTimeline();
+        Gui.drawRect(left,ty,tx-1,timelineEnd,PANEL);
+        Gui.drawRect(tx,ty,right,timelineEnd,0xff191b20);
+        text("Time (s)",left+5,ty+4,MUTED,tx-left-8);
+        int ruler=ty+20;
+        int rowHeight=Math.max(9,Math.min(20,(timelineEnd-ruler-14)/3));
+        String[] channels={"Position","Rotation","Scale"};
+        text(boneName(selected),left+5,ruler+2,FG,tx-left-8);
+        for(int i=0;i<3;i++){
+            final int ch=i;int row=ruler+13+i*rowHeight;
+            if(mode==i)Gui.drawRect(left,row,tx-1,row+rowHeight,0xff363c49);
+            text(channels[i],left+12,row+3,mode==i?ACCENT:MUTED,tx-left-15);
+            controls.add(new Control(left,row,tx-left,rowHeight,()->setMode(ch)));
+            Gui.drawRect(tx,row,right,row+1,0xff2d3039);
+        }
+        double ticks=visibleTicks(),target=ticks/Math.max(2,tw/45);
+        int major=1;for(int candidate:new int[]{1,2,5,10,20,40,100,200,400,800}){major=candidate;if(candidate>=target)break;}
+        int first=(int)Math.floor(timelineStart/major)*major;
+        for(int t=first;t<=timelineStart+ticks;t+=major){
+            int px=timeX(t);if(px<tx||px>=right)continue;
+            Gui.drawRect(px,ty,px+1,timelineEnd,0xff30333c);
+            text(String.format(Locale.ROOT,"%s",java.math.BigDecimal.valueOf(t/20D).stripTrailingZeros().toPlainString()),px+2,ty+3,MUTED,right-px-2);
+            if(major>=5)for(int minor=1;minor<5;minor++){
+                int sx=timeX(t+major*minor/5D);if(sx>=tx&&sx<right)Gui.drawRect(sx,ty+14,sx+1,ty+19,EDGE);
+            }
         }
         if(clip!=null&&selected!=null){
             List<AnimationComponent> track=clip.sets.get(selected.base.identifier);
-            if(track!=null)for(AnimationComponent c:track){
-                if(c.hidden)continue;int a=tx+(int)(tw*c.startKey/(double)length()),b=tx+(int)(tw*(c.startKey+c.length)/(double)length());
-                Gui.drawRect(a,ty+9,Math.max(a+2,b),ty+13,0xff6499c7);
-                Gui.drawRect(a,ty+7,a+2,ty+16,0xffb9d5ed);
+            if(track!=null)for(int ch=0;ch<3;ch++){
+                int ky=ruler+13+ch*rowHeight+rowHeight/2;
+                Set<Integer> keys=new TreeSet<>();
+                for(AnimationComponent c:track)if(!c.hidden&&hasChannel(c,ch)){keys.add(c.startKey);keys.add(c.startKey+c.length);}
+                Integer previous=null;
+                for(int t:keys){
+                    int px=timeX(t);
+                    if(previous!=null){int a=Math.max(tx,timeX(previous)),b=Math.min(right-1,px);if(b>a)Gui.drawRect(a,ky,b,ky+1,0xff526179);}
+                    if(px>=tx+3&&px<right-3)diamond(px,ky,t==frame?0xfff0cd87:0xffa8b6d4);
+                    previous=t;
+                }
             }
         }
-        int pos=tx+(int)(tw*frame/(double)length());Gui.drawRect(pos,ty-2,pos+1,ty+19,0xffffbd69);
-        int yy=bottom+47;
-        button(4,yy,27,16,"G",mode==0,()->setMode(0));button(33,yy,27,16,"R",mode==1,()->setMode(1));button(62,yy,27,16,"S",mode==2,()->setMode(2));
-        int bx=92;
-        for(int i=0;i<3;i++){
-            final int k=i;
-            button(bx,yy,14,16,"XYZ".substring(i,i+1),axis==i,()->axis=k);bx+=16;
-            values[i].x=bx;values[i].y=yy;values[i].drawTextBox();bx+=49;
-            button(bx,yy,13,16,"-",false,()->adjust(k,-step()));bx+=15;
-            button(bx,yy,13,16,"+",false,()->adjust(k,step()));bx+=16;
-        }
-        button(bx,yy,54,16,"Set key",preview,this::keyframe);
-        text(modeName()+" | "+status,5,bottom+70,MUTED,w-10);
-        input(mx,my,ty,tx,tw);
+        int pos=timeX(frame);if(pos>=tx&&pos<right){Gui.drawRect(pos,ty,pos+1,timelineEnd,ACCENT);Gui.drawRect(pos-3,ty,pos+4,ty+4,ACCENT);}
+        text("Wheel: zoom  |  Shift+wheel: pan",left+5,h-11,MUTED,right-left-10);
     }
     private double step(){return mode==0?.5:mode==1?5:.05;}
     private boolean viewport(int x,int y){return x>=left&&x<right&&y>=top&&y<bottom;}
@@ -288,6 +402,12 @@ final class BoneEditor {
         int wheel=Mouse.getDWheel();
         if(wheel!=0){
             if(viewport(mx,my))zoom=(float)Math.max(.15,Math.min(8,zoom*Math.pow(1.12,wheel/120D)));
+            else if(mx>=timelineX()&&mx<right&&my>=timelineTop){
+                double anchor=timelineStart+(mx-timelineX())*visibleTicks()/timelineWidth();
+                if(net.minecraft.client.gui.GuiScreen.isShiftKeyDown())timelineStart-=Integer.signum(wheel)*visibleTicks()*.15;
+                else{timelineZoom=Math.max(1,Math.min(16,timelineZoom*Math.pow(1.25,wheel/120D)));timelineStart=anchor-(mx-timelineX())*visibleTicks()/timelineWidth();}
+                clampTimeline();
+            }
             else if(mx<left)clipScroll-=Integer.signum(wheel)*3;
             else if(mx>=right)boneScroll-=Integer.signum(wheel)*3;
         }
@@ -297,15 +417,16 @@ final class BoneEditor {
             if(!field){
                 boolean clicked=false;
                 for(Control c:controls)if(c.contains(mx,my)){c.action.run();clicked=true;break;}
-                if(!clicked&&my>=ty-3&&my<ty+20){dragTimeline=true;seek((int)Math.round((mx-tx)*length()/(double)tw));}
+                if(!clicked&&mx>=tx&&mx<right&&my>=ty&&my<timelineEnd){dragTimeline=true;seek(timeAt(mx));}
                 else if(!clicked&&viewport(mx,my)){
-                    Hit best=null;double dist=81;
-                    for(Hit hit:hits){double d=(hit.x-mx)*(hit.x-mx)+(hit.y-my)*(hit.y-my);if(d<dist-0.01||(best!=null&&Math.abs(d-dist)<0.01&&hit.z>best.z)){dist=d;best=hit;}}
-                    if(best!=null){if(best.node!=selected)select(best.node);else dragBone=true;}
+                    Node best=null;double depth=Double.NEGATIVE_INFINITY;
+                    for(CubeHit hit:hits){double z=hit.depthAt(mx,my);if(z>depth){depth=z;best=hit.owner;}}
+                    if(best!=null){if(best!=selected)select(best);else dragBone=true;}
+                    else select(null);
                 }
             }
         }else if(l&&leftDown){
-            if(dragTimeline)seek((int)Math.round((mx-tx)*length()/(double)tw));
+            if(dragTimeline)seek(timeAt(mx));
             if(dragBone&&mx!=lastX)adjust(axis,(mx-lastX)*step()*.15);
         }
         if(!l){dragTimeline=false;dragBone=false;}
@@ -331,13 +452,15 @@ final class BoneEditor {
     private void fit(){
         double[] bounds={Double.POSITIVE_INFINITY,Double.POSITIVE_INFINITY,Double.POSITIVE_INFINITY,Double.NEGATIVE_INFINITY,Double.NEGATIVE_INFINITY,Double.NEGATIVE_INFINITY};
         for(Node n:roots)bounds(n,projectScale(),bounds);
+        if(!Double.isFinite(bounds[0])){bounds=new double[]{-8,0,-8,8,24,8};}
         cx=(bounds[0]+bounds[3])/2;cy=(bounds[1]+bounds[4])/2;cz=(bounds[2]+bounds[5])/2;
         extent=Math.max(16,Math.max(bounds[3]-bounds[0],Math.max(bounds[4]-bounds[1],bounds[5]-bounds[2])));
+        floorY=bounds[4]+.08;
         zoom=1;
     }
     private void bounds(Node n,Mat parent,double[] b){
         Mat m=parent.mul(Mat.local(n.base));
-        for(int mask=0;mask<8;mask++){
+        if(n.geometry!=null)for(int mask=0;mask<8;mask++){
             double[] p=m.point(n.base.offset[0]+((mask&1)!=0?n.base.dimensions[0]:0),
                 n.base.offset[1]+((mask&2)!=0?n.base.dimensions[1]:0),n.base.offset[2]+((mask&4)!=0?n.base.dimensions[2]:0));
             for(int i=0;i<3;i++){b[i]=Math.min(b[i],p[i]);b[i+3]=Math.max(b[i+3],p[i]);}
@@ -368,47 +491,98 @@ final class BoneEditor {
             if(textured){GlStateManager.enableTexture2D();GlStateManager.bindTexture(texture);}else GlStateManager.disableTexture2D();
             GlStateManager.translate(vx,vy,200);GlStateManager.scale(size,size,size);
             GlStateManager.rotate(pitch,1,0,0);GlStateManager.rotate(yaw,0,1,0);GlStateManager.translate(-cx,-cy,-cz);
+            drawFloor();
+            if(textured){GlStateManager.enableTexture2D();GlStateManager.bindTexture(texture);}else GlStateManager.disableTexture2D();
+            GlStateManager.enableAlpha();GlStateManager.alphaFunc(GL11.GL_GREATER,.1F);
             GlStateManager.scale(1D/validScale(project.scale[0]),1D/validScale(project.scale[1]),1D/validScale(project.scale[2]));
             for(Node n:roots)renderNode(n,view,null,time,textured);
         }finally{
             GlStateManager.popMatrix();GlStateManager.disableDepth();GlStateManager.enableTexture2D();
             GlStateManager.enableCull();GlStateManager.color(1,1,1,1);
         }
-            if(sticks){
-                GlStateManager.disableTexture2D();GlStateManager.color(.45F,.71F,1F,.9F);GL11.glLineWidth(1.5F);
-                GL11.glBegin(GL11.GL_LINES);
-                for(double[] line:lines){GL11.glVertex2d(line[0],line[1]);GL11.glVertex2d(line[2],line[3]);}
-                GL11.glEnd();GL11.glLineWidth(1F);GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
-                for(Hit hit:hits){
-                    int x=(int)hit.x,y=(int)hit.y;
-                    int c=hit.node==selected?0xffffc66e:ACCENT;
-                    Gui.drawRect(x-2,y-2,x+3,y+3,c);
-                    if(hit.node==selected)text(hit.node.base.name,x+5,y-11,c,120);
-                }
-            }
+            drawOutline();
+            drawAxes();
         }finally{GL11.glDisable(GL11.GL_SCISSOR_TEST);}
     }
-    private final List<double[]> lines=new ArrayList<>();
-    private void renderNode(Node n,Mat parent,Hit parentJoint,float time,boolean textured){
+    // Stable world-space floor at the rest model's feet, independent of animation.
+    private void drawFloor(){
+        GlStateManager.disableTexture2D();
+        double unit=Math.max(1,Math.pow(2,Math.floor(Math.log(Math.max(1,extent/24))/Math.log(2))));
+        int radius=32;double x0=Math.floor(cx/unit)*unit,z0=Math.floor(cz/unit)*unit;
+        GL11.glLineWidth(1F);
+        GL11.glBegin(GL11.GL_LINES);
+        for(int i=-radius;i<=radius;i++){
+            boolean major=i%8==0;
+            GL11.glColor4f(major?.30F:.21F,major?.32F:.23F,major?.36F:.26F,1F);
+            double x=x0+i*unit,z=z0+i*unit;
+            GL11.glVertex3d(x,floorY,z0-radius*unit);GL11.glVertex3d(x,floorY,z0+radius*unit);
+            GL11.glVertex3d(x0-radius*unit,floorY,z);GL11.glVertex3d(x0+radius*unit,floorY,z);
+        }
+        GL11.glEnd();
+        GL11.glColor4f(1,1,1,1);GlStateManager.color(1,1,1,1);
+    }
+    private void drawOutline(){
+        if(selected==null)return;
+        // Draw at the actual projected depth, so hidden edges do not show through other cubes.
+        GlStateManager.enableDepth();GlStateManager.depthMask(false);GlStateManager.disableTexture2D();
+        GL11.glLineWidth(1.8F);
+        GlStateManager.color(.55F,.76F,1F,1F);
+        try{
+            boolean own=false;for(CubeHit hit:hits)if(hit.owner==selected){own=true;break;}
+            GL11.glBegin(GL11.GL_LINES);
+            for(CubeHit hit:hits){
+                if(hit.owner!=selected&&(own||!descendant(selected,hit.owner)))continue;
+                for(int[] edge:EDGES)for(int idx:edge){
+                    double[] v=hit.points[idx];GL11.glVertex3d(v[0],v[1],v[2]+200.15);
+                }
+            }
+            GL11.glEnd();
+        }finally{
+            GL11.glLineWidth(1F);GlStateManager.depthMask(true);GlStateManager.disableDepth();
+            GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
+        }
+    }
+    private boolean descendant(Node root,Node target){
+        if(root==target)return true;for(Node child:root.children)if(descendant(child,target))return true;return false;
+    }
+    private void drawAxes(){
+        int x=right-28,y=bottom-30;
+        Mat m=Mat.rx(pitch).mul(Mat.ry(yaw));
+        int[] colors={0xffdf6969,0xff8cc477,0xff7298ee};
+        for(int a=0;a<3;a++){
+            double[] p=m.point(a==0?15:0,a==1?-15:0,a==2?15:0);
+            GlStateManager.disableTexture2D();GL11.glLineWidth(2F);
+            int c=colors[a];GlStateManager.color(((c>>16)&255)/255F,((c>>8)&255)/255F,(c&255)/255F,1F);
+            GL11.glBegin(GL11.GL_LINES);GL11.glVertex2d(x,y);GL11.glVertex2d(x+p[0],y+p[1]);GL11.glEnd();
+            GL11.glLineWidth(1F);GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
+            text("XYZ".substring(a,a+1),(int)(x+p[0])-2,(int)(y+p[1])-3,c,10);
+        }
+    }
+    private void renderNode(Node n,Mat parent,Node owner,float time,boolean textured){
         eval(n,time);
         if(n==selected&&preview&&proposed!=null)System.arraycopy(proposed,0,channel(n),0,3);
         CubeInfo p=n.pose;
         Mat local=parent.mul(Mat.local(p));
-        Hit hit=parentJoint;
-        if(n.bone){
-            hit=new Hit(n,local.point(0,0,0));hits.add(hit);
-            if(sticks&&parentJoint!=null)lines.add(new double[]{parentJoint.x,parentJoint.y,hit.x,hit.y});
-        }
+        if(n.bone)owner=n;
         GlStateManager.pushMatrix();
         try{
             GlStateManager.translate(p.position[0],p.position[1],p.position[2]);
             GlStateManager.rotate((float)p.rotation[2],0,0,1);GlStateManager.rotate((float)p.rotation[1],0,1,0);GlStateManager.rotate((float)p.rotation[0],1,0,0);
             GlStateManager.scale(p.scale[0],p.scale[1],p.scale[2]);
-            if(!p.hidden&&n.geometry!=null){
+            if(!p.hidden&&n.geometry!=null&&p.opacity>0){
                 GlStateManager.color(textured?1F:.75F,textured?1F:.80F,textured?1F:.86F,(float)Math.max(0,Math.min(1,p.opacity/100)));
                 for(ModelBox b:n.geometry.cubeList)b.render(Tessellator.getInstance().getBuffer(),1F);
+                if(owner!=null){
+                    double[][] corners=new double[8][];
+                    double inflate=n.base.mcScale;
+                    for(int mask=0;mask<8;mask++)corners[mask]=local.point(
+                        n.base.offset[0]+((mask&1)!=0?n.base.dimensions[0]+inflate:-inflate),
+                        n.base.offset[1]+((mask&2)!=0?n.base.dimensions[1]+inflate:-inflate),
+                        n.base.offset[2]+((mask&4)!=0?n.base.dimensions[2]+inflate:-inflate));
+                    hits.add(new CubeHit(owner,corners));
+                }
             }
-            if(!p.hidden)for(Node c:n.children)renderNode(c,local,hit,time,textured);
+            if(!p.hidden)for(Node c:n.children)renderNode(c,local,owner,time,textured);
         }finally{GlStateManager.popMatrix();}
     }
     /** Same T * Rz * Ry * Rx * S local transform as viewport; only for picking and bounds. */
