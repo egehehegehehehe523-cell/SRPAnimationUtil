@@ -50,8 +50,9 @@ public final class ClientHooks {
         if(MC.player!=null)MC.player.sendMessage(new TextComponentString("[SRP Animator] "+text));
     }
     private static boolean srp(Entity entity){
+        if(!(entity instanceof EntityLivingBase))return false;
         ResourceLocation key=net.minecraft.entity.EntityList.getKey(entity);
-        return key!=null && "srparasites".equals(key.getNamespace()) && entity instanceof EntityLivingBase;
+        return key!=null && key.toString().startsWith("srparasites:");
     }
     private EntityLivingBase lookedAt(){
         Entity entity=MC.objectMouseOver==null?null:MC.objectMouseOver.entityHit;
@@ -150,10 +151,20 @@ public final class ClientHooks {
     }
     @SubscribeEvent
     public void tabulaDraw(GuiScreenEvent.DrawScreenEvent.Pre e){
-        if(!(e.getGui() instanceof GuiWorkspace)){appendDown=Keyboard.isKeyDown(append.getKeyCode());return;}
+        if(!(e.getGui() instanceof GuiWorkspace)){appendDown=append.getKeyCode()>0 && Keyboard.isKeyDown(append.getKeyCode());return;}
         GuiWorkspace workspace=(GuiWorkspace)e.getGui();
         // 7.1.0 retained the editor; the original toggle merely shows a warning.
         Tabula.config.animationWarning=1;
+        // The 7.1 timeline copies its cursor to playTime during its own drawing pass,
+        // which happens after the model preview. Synchronize first when scrubbing paused clips.
+        ProjectInfo active=workspace.getOpenProject();
+        if(active!=null && workspace.windowAnimate!=null){
+            String selection=workspace.windowAnimate.animList.selectedIdentifier;
+            for(Animation animation:active.anims)if(animation.identifier.equals(selection)&&!animation.playing){
+                animation.playTime=Math.max(0,Math.min(animation.getLength(),workspace.windowAnimate.timeline.getCurrentPos()));
+                break;
+            }
+        }
         boolean down=append.getKeyCode()>0 && Keyboard.isKeyDown(append.getKeyCode());
         if(down&&!appendDown)try{importNext(workspace);}catch(Exception|LinkageError ex){failed("Tabula import",ex);}
         appendDown=down;
@@ -161,7 +172,7 @@ public final class ClientHooks {
     @SubscribeEvent
     public void tabulaOverlay(GuiScreenEvent.DrawScreenEvent.Post e){
         if(!(e.getGui() instanceof GuiWorkspace))return;
-        String s="SRP Animator | "+pending.size()+" pending | F9: append/import";
+        String s="SRP Animator | "+pending.size()+" pending | "+Keyboard.getKeyName(append.getKeyCode())+": append/import";
         MC.fontRenderer.drawStringWithShadow(s,5,Math.max(2,e.getGui().height-12),0xFFAAEEFF);
     }
     private void importNext(GuiWorkspace workspace){
