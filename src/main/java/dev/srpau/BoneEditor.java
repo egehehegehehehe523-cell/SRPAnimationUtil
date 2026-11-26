@@ -939,7 +939,9 @@ final class BoneEditor {
         double[] h=lower.base.position;
         CubeInfo box=upper.base;
         GlStateManager.color(1,1,1,1);
-        JointSeam.draw(box.offset[0],box.offset[1]+6,box.offset[2],4,4,box.txOffset[0],box.txOffset[1]+4,
+        double lowerInflation=0;
+        for(Node child:lower.children)if(child.geometry!=null&&Arrays.equals(child.base.dimensions,new int[]{4,6,4})){lowerInflation=child.base.mcScale;break;}
+        JointSeam.draw(box.offset[0],box.offset[1]+6,box.offset[2],4,4,box.mcScale,box.mcScale,lowerInflation,lowerInflation,box.txOffset[0],box.txOffset[1]+4,
             project.textureWidth,project.textureHeight,box.txMirror,1F,
             point->transform.point(point[0]-h[0],point[1]-h[1],point[2]-h[2]));
     }

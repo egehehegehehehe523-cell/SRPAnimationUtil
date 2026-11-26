@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.13 development prototype)
+# SRP Animation Util (0.1.14 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -57,3 +57,6 @@ The user-provided ModelInfPlayer.tbl (SHA-256 recorded in the asset) contained 4
 
 ## Full idle replacement and elbow seams (0.1.13)
 The active idle resource is now adventurer_idle_full.json, compiled from all 94 bone poses of the supplied TBL (41 integer-tick samples, seven deduplicated curves, five decimal places). Every position and Euler rotation is evaluated absolutely, rather than adding only authored edits to SRP's native pose. At idle entry and exit the original pose blends over four ticks; ping-pong playback preserves the nonmatching endpoints without snapping. Foot planting remains layered after the authored pose. Original native model fields are restored after each draw. For now full idle replacement is disabled with armour to avoid mismatched armour poses; the previous split/planting fallback remains. Elbow cut faces are closed and the opening side is bridged with a narrow textured triangle strip in both editor and runtime; the original rigid boxes and hinge IDs remain. This is not weighted skinning or a change to TBL. Existing split projects migrate their atlas once. Gameplay and editor visual verification are required.
+
+## 0.1.14 elbow rendering correction
+The previous connector used inward-facing triangle winding and omitted faces based on a single vertical separation test. Replace that with a shared four-sided cut-ring bridge, outward winding, two-sided rendering, actual upper/lower inflation, and edge-texel sampling. The existing closed cut caps remain. This is independent of the elbow's Euler channel or world-facing direction; no animation retargeting, hinge relocation or foot solver changes. Runtime UV recovery rounds the original ModelBox face coordinates rather than truncating the non-power-of-two texture. Geometry tests cover positive and negative rotations on all three axes. The bundled full idle resource is unchanged. In-game visual verification remains necessary.

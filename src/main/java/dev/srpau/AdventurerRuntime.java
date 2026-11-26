@@ -212,7 +212,7 @@ public final class AdventurerRuntime {
                 u.addChild(new ModelRenderer(mesh){
                     @Override public void render(float unit){
                         Rot rot=rotation(lower);
-                        JointSeam.draw(box.posX1,h[1],box.posZ1,4,4,tex[0],tex[1]+4,
+                        JointSeam.draw(box.posX1,h[1],box.posZ1,4,4,.01,0,0,0,tex[0],tex[1]+4,
                             model.textureWidth,model.textureHeight,o.mirror,unit,
                             point->add(translation(lower),rot.apply(sub(point,h))));
                     }
@@ -243,10 +243,29 @@ public final class AdventurerRuntime {
         Class<?> face=Class.forName("goblinbob.mobends.core.client.model.BoxFactory$TextureFace");
         Class<?> splitter=Class.forName("goblinbob.mobends.core.definition.BoxSplitter");
         Object nativeFactory=factory.getConstructor(ModelRenderer.class,ModelBox.class).newInstance(original,source);
+        // The native BoxFactory recovery truncates floating UVs on non-power-of-two
+        // textures. Recover the actual rectangles by rounding the source vertices.
+        // Do not modify the SRP model or its texture.
+        net.minecraft.client.model.TexturedQuad[] quads=null;
+        for(java.lang.reflect.Field f:ModelBox.class.getDeclaredFields()){
+            if(f.getType()==net.minecraft.client.model.TexturedQuad[].class){
+                f.setAccessible(true);quads=(net.minecraft.client.model.TexturedQuad[])f.get(source);break;
+            }
+        }
         Object faces=factory.getField("faces").get(nativeFactory);
         float[][] uv=new float[6][4];
         String[] names={"uPos","vPos","uSize","vSize"};
-        for(int i=0;i<6;i++)for(int j=0;j<4;j++)uv[i][j]=face.getField(names[j]).getInt(Array.get(faces,i));
+        for(int i=0;i<6;i++){
+            for(int j=0;j<4;j++)uv[i][j]=face.getField(names[j]).getInt(Array.get(faces,i));
+            if(quads!=null&&quads.length==6){
+                net.minecraft.client.model.PositionTextureVertex[] vs=quads[i].vertexPositions;
+                net.minecraft.client.model.PositionTextureVertex start=vs[original.mirror?2:1],end=vs[original.mirror?0:3];
+                uv[i][0]=Math.round(start.texturePositionX*original.textureWidth);
+                uv[i][1]=Math.round(start.texturePositionY*original.textureHeight);
+                uv[i][2]=Math.round((end.texturePositionX-start.texturePositionX)*original.textureWidth);
+                uv[i][3]=Math.round((end.texturePositionY-start.texturePositionY)*original.textureHeight);
+            }
+        }
         Method split=splitter.getMethod("split",float[].class,float[].class,float[][].class,int.class,float[].class,int.class,int.class,boolean.class);
         List<?> segments=(List<?>)split.invoke(null,new float[]{source.posX1,source.posY1,source.posZ1},
             new float[]{source.posX2,source.posY2,source.posZ2},uv,1,new float[]{.5F},2,knee?-1:1,true);
