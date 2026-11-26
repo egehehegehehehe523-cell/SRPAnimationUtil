@@ -3,6 +3,7 @@ package dev.srpau;
 import net.minecraft.entity.*;
 import net.minecraft.entity.ai.*;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.item.EntityArmorStand;
 import net.minecraft.pathfinding.Path;
 import net.minecraft.util.math.*;
 import net.minecraft.world.World;
@@ -30,7 +31,9 @@ public final class SkinwalkerAI {
     }
     static final class Goal extends EntityAIBase {
         final EntityCreature mob;
-        EntityPlayer target;
+        EntityLivingBase target;
+        List<EntityArmorStand> testObservers=Collections.emptyList();
+        int nextObserverScan;
         Vec3d destination;
         BlockPos cover;
         boolean peeking,fleeing;
@@ -45,26 +48,51 @@ public final class SkinwalkerAI {
         @Override public void resetTask(){clear();}
         private void clear(){mob.getNavigator().clearPath();mob.setSneaking(false);mob.setSprinting(false);destination=null;cover=null;peeking=false;fleeing=false;lock.reset();}
         private Vec3d feet(){return new Vec3d(mob.posX,mob.posY,mob.posZ);}
-        private static boolean valid(EntityPlayer p){return p!=null&&p.isEntityAlive()&&!p.isSpectator()&&!p.capabilities.isCreativeMode;}
-        private EntityPlayer nearest(){
-            EntityPlayer best=null;double dist=48*48;
+        private boolean valid(EntityLivingBase p){
+            if(p==null||!p.isEntityAlive()||p.world!=mob.world)return false;
+            if(p instanceof EntityPlayer)return !p.isSpectator()&&!((EntityPlayer)p).capabilities.isCreativeMode;
+            return p instanceof EntityArmorStand;
+        }
+        private void refreshObservers(int tick){
+            if(tick<nextObserverScan)return;
+            nextObserverScan=tick+20;
+            // One bounded entity query per second, never per cover candidate.
+            testObservers=mob.world.getEntitiesWithinAABB(EntityArmorStand.class,
+                mob.getEntityBoundingBox().grow(48));
+        }
+        private EntityLivingBase nearest(){
+            EntityLivingBase best=null;double dist=48*48;
             for(EntityPlayer p:mob.world.playerEntities)if(valid(p)){
+                double d=mob.getDistanceSq(p);if(d<dist){dist=d;best=p;}
+            }
+            for(EntityArmorStand p:testObservers)if(valid(p)){
                 double d=mob.getDistanceSq(p);if(d<dist){dist=d;best=p;}
             }
             return best;
         }
+        private Vec3d gaze(EntityLivingBase p){
+            if(!(p instanceof EntityArmorStand))return p.getLook(1);
+            // Stand poses rotate the skull relative to its base, not entity look.
+            Rotations head=((EntityArmorStand)p).getHeadRotation();
+            double yaw=Math.toRadians(p.rotationYaw+head.getY());
+            double pitch=Math.toRadians(head.getX());
+            double cp=Math.cos(pitch);
+            return new Vec3d(-Math.sin(yaw)*cp,-Math.sin(pitch),Math.cos(yaw)*cp);
+        }
         private boolean clearRay(Vec3d from,Vec3d to){
             return mob.world.rayTraceBlocks(from,to,false,true,false)==null;
         }
-        private boolean visible(EntityPlayer p,Vec3d point){
+        private boolean visible(EntityLivingBase p,Vec3d point){
             Vec3d eye=p.getPositionEyes(1),delta=point.subtract(eye);
             double len=Math.sqrt(delta.x*delta.x+delta.y*delta.y+delta.z*delta.z);if(len>48||len<1e-6)return len<1e-6;
             // Generous 120-degree total view cone to account for camera FOV.
-            return p.getLook(1).dotProduct(delta.scale(1/len))>.5&&clearRay(eye,point);
+            return gaze(p).dotProduct(delta.scale(1/len))>.5&&clearRay(eye,point);
         }
         private boolean seen(Vec3d pos){
-            // No scan of unrelated mobs. Check player observers only.
+            // Check players and cached armour-stand test observers only.
             for(EntityPlayer p:mob.world.playerEntities)if(valid(p)&&p.getDistanceSq(pos.x,pos.y,pos.z)<48*48&&
+                (visible(p,pos.add(0,1.55,0))||visible(p,pos.add(0,.7,0))))return true;
+            for(EntityArmorStand p:testObservers)if(valid(p)&&p.getDistanceSq(pos.x,pos.y,pos.z)<48*48&&
                 (visible(p,pos.add(0,1.55,0))||visible(p,pos.add(0,.7,0))))return true;
             return false;
         }
@@ -75,6 +103,7 @@ public final class SkinwalkerAI {
         private boolean headSeen(Vec3d p,float yaw){
             Vec3d head=peekHead(p,yaw);
             for(EntityPlayer observer:mob.world.playerEntities)if(valid(observer)&&visible(observer,head))return true;
+            for(EntityArmorStand observer:testObservers)if(valid(observer)&&visible(observer,head))return true;
             return false;
         }
         private boolean fits(Vec3d p){
@@ -161,8 +190,9 @@ public final class SkinwalkerAI {
         }
         @Override public void updateTask(){
             int tick=mob.ticksExisted;
+            refreshObservers(tick);
             if((!peeking&&tick>=nextTarget)||!valid(target)){
-                nextTarget=tick+20;EntityPlayer n=nearest();
+                nextTarget=tick+20;EntityLivingBase n=nearest();
                 if(n!=target){clear();target=n;nextPlan=tick;}
             }
             if(!valid(target)){clear();return;}
