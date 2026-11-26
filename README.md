@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.15 development prototype)
+# SRP Animation Util (0.1.16 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -63,3 +63,6 @@ The previous connector used inward-facing triangle winding and omitted faces bas
 
 ## 0.1.15 torso control and player walk test
 Insert 9004_torsoCore at (0,12,0) below mainbody; all except the two hip branches are reparented with inverse pivot offset. Existing bone IDs and additive animation offsets are unchanged. Existing TBLs migrate once on open/import. Gameplay uses a separate root proxy and torso carrier (original boxes, no change to native hierarchy); stationary foot anchors are unchanged, but torso follows the planted stance with damped yaw, roll and support-foot weight shifts, and pelvis shifts are compensated by the original IK solver. Unarmoured normal walking samples installed Mo' Bends Alpha.3 walk_base, walk_forelegs and walk_swing at limbSwing*0.6662, with swing amount weighting and quaternion interpolation; maps body to torsoCore and retargets arm rotations through actual shoulder parent chains. Four-tick transition, native motion fallback on missing clips or special states; native head/tendril motion remains. No full Kumo driver integration, no imported editor walk clip, no armour changes. Experimental, needs in-game testing.
+
+## 0.1.16 walk retarget correction
+Reads the active Mo' Bends resource manager, classpath or installed mod jar. Logs first active walk and first movement rejected by state/armour/clip availability. Slow Adventurer movement previously supplied tiny vanilla swing amounts; normalize them with a .65 minimum gait amplitude during actual movement, hysteresis and a 1.5x phase rate for shorter strides. Reproduce the player's stepped knee targets with a one-tick exponential smoothing approximation. Compensate the SRP root pitch when mapping player upper legs. Idle, elbow geometry and stationary foot solver unchanged; planting resumes once the walk has faded out. This uses the actual installed walk clips, not the entire Kumo graph. Normal-state restrictions and armour fallback remain. Needs in-game verification.

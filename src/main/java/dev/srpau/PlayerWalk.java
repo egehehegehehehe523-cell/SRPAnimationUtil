@@ -11,9 +11,37 @@ final class PlayerWalk {
     final Clip base,knees,swing;
     private PlayerWalk(Clip base,Clip knees,Clip swing){this.base=base;this.knees=knees;this.swing=swing;}
     static PlayerWalk load()throws IOException{return new PlayerWalk(read("walk_base"),read("walk_forelegs"),read("walk_swing"));}
+    private static InputStream open(String name)throws IOException{
+        String path=PATH+name+".json";
+        // Forge's active resource manager also supports enabled resource packs.
+        try{
+            return net.minecraft.client.Minecraft.getMinecraft().getResourceManager()
+                .getResource(new net.minecraft.util.ResourceLocation("mobends","bends/animations/biped/"+name+".json")).getInputStream();
+        }catch(IOException ignored){}
+        InputStream in=PlayerWalk.class.getResourceAsStream(path);
+        if(in!=null)return in;
+        net.minecraftforge.fml.common.ModContainer mod=net.minecraftforge.fml.common.Loader.instance().getIndexedModList().get("mobends");
+        if(mod!=null){
+            File src=mod.getSource();
+            if(src.isDirectory()){
+                File f=new File(src,path.substring(1));
+                if(f.isFile())return new FileInputStream(f);
+            }else if(src.isFile()){
+                try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(src)){
+                    java.util.zip.ZipEntry entry=zip.getEntry(path.substring(1));
+                    if(entry!=null)try(InputStream stream=zip.getInputStream(entry)){
+                        ByteArrayOutputStream out=new ByteArrayOutputStream();
+                        byte[] bytes=new byte[8192];int n;
+                        while((n=stream.read(bytes))!=-1)out.write(bytes,0,n);
+                        return new ByteArrayInputStream(out.toByteArray());
+                    }
+                }
+            }
+        }
+        throw new IOException("Missing Mo' Bends clip "+name+" in resources or installed jar");
+    }
     private static Clip read(String name)throws IOException{
-        try(InputStream in=PlayerWalk.class.getResourceAsStream(PATH+name+".json")){
-            if(in==null)throw new IOException("Missing Mo' Bends clip "+name);
+        try(InputStream in=open(name)){
             Clip c=new Gson().fromJson(new InputStreamReader(in,StandardCharsets.UTF_8),Clip.class);
             if(c==null||c.formatVersion!=2||c.duration<=0||c.bones==null)throw new IOException("Invalid clip "+name);
             for(Track t:c.bones.values()){
