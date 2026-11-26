@@ -34,7 +34,8 @@ public final class SkinwalkerAI {
         Vec3d destination;
         BlockPos cover;
         boolean peeking,fleeing;
-        int nextPlan,nextTarget,peekUntil;
+        int nextPlan,nextTarget,peekUntil,avoidUntil;
+        BlockPos lastExposedCover;
         double speed=1.8;
         Goal(EntityCreature mob){this.mob=mob;setMutexBits(3);}
         @Override public boolean shouldExecute(){return mob.isEntityAlive()&&!mob.isInWater()&&!mob.isInLava();}
@@ -65,6 +66,16 @@ public final class SkinwalkerAI {
                 (visible(p,pos.addVector(0,1.55,0))||visible(p,pos.addVector(0,.7,0))))return true;
             return false;
         }
+        private Vec3d peekHead(Vec3d p,BlockPos b){
+            double x=target.posX-(b.getX()+.5),z=target.posZ-(b.getZ()+.5);
+            double fx=Math.abs(x)>=Math.abs(z)?Math.signum(x):0,fz=fx==0?Math.signum(z):0;
+            return p.addVector(fz*.8,1.75,-fx*.8);
+        }
+        private boolean headSeen(Vec3d p,BlockPos b){
+            Vec3d head=peekHead(p,b);
+            for(EntityPlayer observer:mob.world.playerEntities)if(valid(observer)&&visible(observer,head))return true;
+            return false;
+        }
         private boolean fits(Vec3d p){
             BlockPos at=new BlockPos(p);
             if(!mob.world.isBlockLoaded(at)||!mob.world.isBlockLoaded(at.up()))return false;
@@ -85,6 +96,7 @@ public final class SkinwalkerAI {
                 if(dx*dx+dz*dz>36)continue;
                 for(int dy=-1;dy<=1;dy++){
                     BlockPos b=origin.add(dx,dy,dz);
+                    if(b.equals(lastExposedCover)&&mob.ticksExisted<avoidUntil)continue;
                     if(!w.isBlockLoaded(b)||!w.isBlockLoaded(b.up())||
                         !w.getBlockState(b).isFullCube()||!w.getBlockState(b.up()).isFullCube())continue;
                     double cx=b.getX()+.5,cz=b.getZ()+.5;
@@ -100,7 +112,7 @@ public final class SkinwalkerAI {
                     // lean should have a sight line around the left edge.
                     if(clearRay(observer,p.addVector(0,.8,0)))continue;
                     boolean headClear=clearRay(observer,p.addVector(fz*.8,1.75,-fx*.8));
-                    if(!escaping&&!headClear)continue;
+                    if(!escaping&&(!headClear||headSeen(p,b)))continue;
                     if(seen(p))continue;
                     double dd=p.squareDistanceTo(here),td=p.squareDistanceTo(new Vec3d(target.posX,target.posY,target.posZ));
                     if(td<9||dd<.05)continue;
@@ -146,8 +158,10 @@ public final class SkinwalkerAI {
             if(!valid(target)){clear();return;}
             boolean exposed=seen(feet());
             if(peeking){
-                if(exposed||tick>=peekUntil||!mob.world.getBlockState(cover).isFullCube()){
-                    clear();nextPlan=tick;fleeing=exposed;
+                boolean caught=exposed||headSeen(feet(),cover);
+                if(caught||tick>=peekUntil||!mob.world.getBlockState(cover).isFullCube()){
+                    if(caught){lastExposedCover=cover;avoidUntil=tick+100;}
+                    clear();nextPlan=tick;fleeing=caught;exposed|=caught;
                 }else{face();mob.setSneaking(true);return;}
             }
             boolean escaping=exposed||mob.getDistanceSq(target)<9;
@@ -163,7 +177,8 @@ public final class SkinwalkerAI {
                 speed=MathHelper.clamp(speed*(1+.04*(expected/moved-1)),.65,2.8);
                 mob.getNavigator().setSpeed(speed);
             }
-            if(destination!=null&&cover!=null&&feet().squareDistanceTo(destination)<.20){
+            if(destination!=null&&cover!=null&&(feet().squareDistanceTo(destination)<.20||
+                (mob.getNavigator().noPath()&&feet().squareDistanceTo(destination)<1.44))&&fits(destination)){
                 // Navigator rounds to block centres. Finish the fractional
                 // half-block offset with the vanilla move helper, no teleport.
                 if(feet().squareDistanceTo(destination)>.025){
@@ -172,7 +187,8 @@ public final class SkinwalkerAI {
                     return;
                 }
                 mob.getNavigator().clearPath();mob.setSprinting(false);
-                if(!exposed){peeking=true;peekUntil=tick+80;mob.setSneaking(true);face();return;}
+                if(!exposed&&!headSeen(feet(),cover)){peeking=true;peekUntil=tick+80;mob.setSneaking(true);face();return;}
+                lastExposedCover=cover;avoidUntil=tick+60;
                 destination=null;cover=null;
             }
             if(tick>=nextPlan&&(destination==null||mob.getNavigator().noPath()||escaping)){
