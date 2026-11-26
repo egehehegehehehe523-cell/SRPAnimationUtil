@@ -2,6 +2,8 @@ package dev.srpau;
 
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EnumPlayerModelParts;
+import net.minecraft.nbt.NBTUtil;
 import net.minecraft.inventory.EntityEquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
@@ -29,21 +31,60 @@ final class SkinwalkerState {
         seen.setInteger(id,count);
         d.setInteger("SeenTicks",count);
         if(count<SeenProgress.REQUIRED)return;
-        NBTTagCompound identity=new NBTTagCompound();
-        identity.setString("UUID",id);
-        identity.setString("Name",target instanceof EntityPlayer?target.getName():"Steve");
-        identity.setBoolean("Stand",!(target instanceof EntityPlayer));
-        NBTTagList gear=new NBTTagList();
-        for(EntityEquipmentSlot slot:EntityEquipmentSlot.values()){
-            ItemStack item=target.getItemStackFromSlot(slot);
-            NBTTagCompound entry=new NBTTagCompound();
-            entry.setString("Slot",slot.name());
-            if(!item.isEmpty())entry.setTag("Item",item.writeToNBT(new NBTTagCompound()));
-            gear.appendTag(entry);
-        }
-        identity.setTag("Gear",gear);
+        NBTTagCompound identity=snapshot(target);
         d.setTag("Identity",identity);
         org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("Adventurer learned disguise for "+identity.getString("Name")+" after "+count+" peek ticks.");
+    }
+    private static NBTTagCompound snapshot(EntityLivingBase target){
+        NBTTagCompound identity=new NBTTagCompound();
+        identity.setString("UUID",target.getUniqueID().toString());
+        identity.setString("Name",target instanceof EntityPlayer?target.getName():"Steve");
+        identity.setBoolean("Stand",!(target instanceof EntityPlayer));
+        identity.setBoolean("LeftHand",target.getPrimaryHand()==net.minecraft.util.EnumHandSide.LEFT);
+        NBTTagList hotbar=new NBTTagList(),gear=new NBTTagList();
+        int flags=127,selected=0;
+        if(target instanceof EntityPlayer){
+            EntityPlayer player=(EntityPlayer)target;
+            identity.setTag("Profile",NBTUtil.writeGameProfile(new NBTTagCompound(),player.getGameProfile()));
+            flags=0;
+            for(EnumPlayerModelParts part:EnumPlayerModelParts.values())if(player.isWearing(part))flags|=part.getPartMask();
+            selected=player.inventory.currentItem;
+            for(int i=0;i<9;i++){
+                ItemStack stack=player.inventory.getStackInSlot(i);
+                if(!stack.isEmpty()){
+                    NBTTagCompound entry=stack.writeToNBT(new NBTTagCompound());
+                    entry.setInteger("Slot",i);hotbar.appendTag(entry);
+                }
+            }
+        }else{
+            ItemStack main=target.getHeldItemMainhand();
+            if(!main.isEmpty()){
+                NBTTagCompound entry=main.writeToNBT(new NBTTagCompound());
+                entry.setInteger("Slot",0);hotbar.appendTag(entry);
+            }
+        }
+        for(EntityEquipmentSlot slot:EntityEquipmentSlot.values()){
+            if(slot==EntityEquipmentSlot.MAINHAND)continue;
+            ItemStack item=target.getItemStackFromSlot(slot);
+            if(item.isEmpty())continue;
+            NBTTagCompound entry=new NBTTagCompound();
+            entry.setString("Slot",slot.name());entry.setTag("Item",item.writeToNBT(new NBTTagCompound()));
+            gear.appendTag(entry);
+        }
+        identity.setInteger("ModelFlags",flags);identity.setInteger("Selected",Math.max(0,Math.min(8,selected)));
+        identity.setTag("Hotbar",hotbar);identity.setTag("Gear",gear);
+        return identity;
+    }
+    static void refreshIdentity(EntityLivingBase e,EntityLivingBase target){
+        if(target!=null&&target.isEntityAlive()&&ready(e)&&!disguised(e)&&
+            data(e).getCompoundTag("Identity").getString("UUID").equals(target.getUniqueID().toString()))
+            data(e).setTag("Identity",snapshot(target));
+    }
+    static int selected(EntityLivingBase e){return data(e).getCompoundTag("Identity").getInteger("Selected");}
+    static void select(EntityLivingBase e,int slot){
+        NBTTagCompound id=data(e).getCompoundTag("Identity");
+        slot=Math.max(0,Math.min(8,slot));
+        if(id.getInteger("Selected")!=slot){id.setInteger("Selected",slot);SkinwalkerNetwork.sync(e);}
     }
     static NBTTagCompound visual(EntityLivingBase e){
         NBTTagCompound d=data(e),out=new NBTTagCompound();

@@ -38,7 +38,9 @@ public final class SkinwalkerAI {
         Vec3d destination;
         BlockPos cover;
         boolean peeking,fleeing;
-        int nextPlan,nextTarget,avoidUntil,fleeUntil,safeTicks,nextPassiveWalk;
+        int nextPlan,nextTarget,avoidUntil,fleeUntil,safeTicks,nextPassiveWalk,nextPassiveLook,nextSlot,stopAt;
+        Vec3d interest;
+        int passiveMode;
         float coverYaw;
         final PeekLock lock=new PeekLock();
         BlockPos lastExposedCover;
@@ -192,13 +194,58 @@ public final class SkinwalkerAI {
             mob.getLookHelper().setLookPositionWithEntity(target,30,30);
             mob.setSprinting(false);mob.setSneaking(true);SkinwalkerState.peek(mob,true);
         }
+        // Short, purposeful action bouts rather than a continuous mob wander.
+        // All item changes are visual only; no interaction or inventory on mob.
         private void passive(int tick){
-            mob.setAttackTarget(null);mob.setSneaking(false);mob.setSprinting(false);
-            if(tick<nextPassiveWalk)return;
-            nextPassiveWalk=tick+60+mob.getRNG().nextInt(100);
-            if(!mob.getNavigator().noPath())return;
-            Vec3d point=RandomPositionGenerator.findRandomTarget(mob,6,2);
-            if(point!=null)mob.getNavigator().tryMoveToXYZ(point.x,point.y,point.z,1.0);
+            mob.setAttackTarget(null);
+            java.util.Random rand=mob.getRNG();
+            if(tick>=nextSlot){
+                nextSlot=tick+40+rand.nextInt(140);
+                net.minecraft.nbt.NBTTagList bar=SkinwalkerState.data(mob).getCompoundTag("Identity").getTagList("Hotbar",10);
+                // Prefer a nonempty slot, occasionally choose an empty hand.
+                int slot=rand.nextInt(9);
+                if(bar.tagCount()>0&&rand.nextInt(5)!=0)slot=bar.getCompoundTagAt(rand.nextInt(bar.tagCount())).getInteger("Slot");
+                SkinwalkerState.select(mob,slot);
+            }
+            if(tick>=stopAt&&passiveMode!=0){
+                mob.getNavigator().clearPath();passiveMode=0;mob.setSprinting(false);mob.setSneaking(false);
+                nextPassiveWalk=tick+20+rand.nextInt(60);
+            }
+            if(tick>=nextPassiveWalk&&passiveMode==0){
+                nextPassiveWalk=tick+20+rand.nextInt(65);
+                int choice=rand.nextInt(10);
+                if(choice<7){
+                    Vec3d point=RandomPositionGenerator.findRandomTarget(mob,choice==0?12:8,2);
+                    if(point!=null&&mob.getNavigator().tryMoveToXYZ(point.x,point.y,point.z,speed)){
+                        passiveMode=choice==0?2:1;stopAt=tick+50+rand.nextInt(70);
+                        interest=point.add(0,1.6,0);
+                    }
+                }else if(choice==7){
+                    passiveMode=3;stopAt=tick+15+rand.nextInt(25); // brief crouch
+                    interest=feet().add(rand.nextDouble()*4-2,0,rand.nextDouble()*4-2);
+                }else{
+                    // Stop to inspect terrain or a nearby entity, without attacking.
+                    EntityLivingBase observer=nearest();
+                    interest=observer!=null&&mob.getDistanceSq(observer)<100&&rand.nextBoolean()
+                        ?observer.getPositionEyes(1):feet().add(rand.nextDouble()*12-6,rand.nextDouble()*3,rand.nextDouble()*12-6);
+                }
+            }
+            if((passiveMode==1||passiveMode==2)&&mob.getNavigator().noPath())stopAt=tick;
+            mob.setSprinting(passiveMode==2);mob.setSneaking(passiveMode==3);
+            if(passiveMode==1||passiveMode==2){
+                double moved=Math.hypot(mob.posX-mob.prevPosX,mob.posZ-mob.prevPosZ);
+                if(mob.onGround&&moved>.035&&!mob.collidedHorizontally){
+                    double expected=passiveMode==2?.2806:.21585;
+                    speed=MathHelper.clamp(speed*(1+.04*(expected/moved-1)),.65,2.8);
+                    mob.getNavigator().setSpeed(speed);
+                }
+            }
+            if(tick>=nextPassiveLook){
+                nextPassiveLook=tick+20+rand.nextInt(45);
+                if(passiveMode==0&&rand.nextBoolean())
+                    interest=feet().add(rand.nextDouble()*12-6,rand.nextDouble()*3,rand.nextDouble()*12-6);
+            }
+            if(interest!=null)mob.getLookHelper().setLookPosition(interest.x,interest.y,interest.z,12,10);
         }
         @Override public void updateTask(){
             int tick=mob.ticksExisted;
@@ -209,6 +256,7 @@ public final class SkinwalkerAI {
             if(SkinwalkerState.ready(mob)&&!peeking){
                 safeTicks=SeenProgress.safe(safeTicks,mob.onGround&&!seen(feet()));
                 if(safeTicks>=SeenProgress.SAFE_TICKS){
+                    SkinwalkerState.refreshIdentity(mob,target);
                     clear();SkinwalkerState.disguise(mob);passive(tick);return;
                 }
             }else safeTicks=0;

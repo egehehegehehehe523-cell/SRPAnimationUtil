@@ -6,7 +6,8 @@
   "client": [
     "WindowImportMixin",
     "WindowTopDockMixin",
-    "AdventurerRenderMixin"
+    "AdventurerRenderMixin",
+    "DisguiseRenderMixin"
   ],
   "injectors": {
     "defaultRequire": 1
