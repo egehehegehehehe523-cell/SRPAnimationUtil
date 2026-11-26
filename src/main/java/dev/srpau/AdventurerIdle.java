@@ -6,22 +6,29 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-/** Only the authored additive edits from the supplied TBL, not its sampled
- * native motion. Native SRP continues to evaluate its own procedural idle.
- * The added curves ping-pong because the authored endpoints differ. */
+/** Full absolute pose samples from the edited Tabula idle. */
 final class AdventurerIdle {
-    static final String PATH="/assets/srpanimationutil/animations/adventurer_idle_edits.json";
+    static final String PATH="/assets/srpanimationutil/animations/adventurer_idle_full.json";
     String rig;
     int duration;
-    Map<String,double[][]> tracks;
+    Map<String,com.google.gson.JsonArray> poses;
+    double[][] curves;
+    private final transient java.util.Map<String,double[][]> compiled=new java.util.HashMap<>();
     static AdventurerIdle load() throws Exception {
         try(InputStream in=AdventurerIdle.class.getResourceAsStream(PATH)){
             if(in==null)throw new IllegalStateException("Missing "+PATH);
             AdventurerIdle a=new Gson().fromJson(new InputStreamReader(in,StandardCharsets.UTF_8),AdventurerIdle.class);
-            if(a==null||a.duration<=0||a.duration>1200||a.tracks==null)throw new IllegalArgumentException("Bad idle resource");
-            for(double[][] track:a.tracks.values())for(double[] c:track){
-                if(c.length!=11||c[0]<0||c[1]<=0||c[0]+c[1]>a.duration)throw new IllegalArgumentException("Bad idle component");
-                for(double v:c)if(!Double.isFinite(v))throw new IllegalArgumentException("Non-finite idle component");
+            if(a==null||a.duration!=40||a.poses==null||a.poses.size()!=94||a.curves==null)throw new IllegalArgumentException("Bad idle resource");
+            for(Map.Entry<String,com.google.gson.JsonArray> e:a.poses.entrySet()){
+                if(e.getValue().size()!=6)throw new IllegalArgumentException("Bad pose "+e.getKey());
+                double[][] p=new double[6][];
+                for(int i=0;i<6;i++){
+                    com.google.gson.JsonPrimitive v=e.getValue().get(i).getAsJsonPrimitive();
+                    p[i]=v.isString()?a.curves[Integer.parseInt(v.getAsString().substring(1))]:new double[]{v.getAsDouble()};
+                    if(p[i].length!=1&&p[i].length!=a.duration+1)throw new IllegalArgumentException("Bad curve length");
+                    for(double d:p[i])if(!Double.isFinite(d))throw new IllegalArgumentException("Nonfinite pose");
+                }
+                a.compiled.put(e.getKey(),p);
             }
             return a;
         }
@@ -30,19 +37,14 @@ final class AdventurerIdle {
         double t=Math.max(0,time)%(2D*duration);
         return t<=duration?t:2D*duration-t;
     }
-    // Output rotation degrees, then positional offsets in model pixels.
+    boolean has(String name){return compiled.containsKey(name);}
+    // Absolute position (pixels), then Euler rotation (degrees).
     void evaluate(String name,double tick,double[] out){
-        java.util.Arrays.fill(out,0);
-        double[][] track=tracks.get(name);
-        if(track==null)return;
-        for(double[] c:track){
-            if(tick<c[0])continue;
-            double f=Math.min(1,(tick-c[0])/c[1]);
-            for(int i=0;i<3;i++){
-                out[i]+=c[2+i]+c[5+i]*f;
-                out[3+i]+=c[8+i];
-            }
-        }
+        double[][] p=compiled.get(name);
+        if(p==null)throw new IllegalArgumentException("Missing pose "+name);
+        tick=Math.max(0,Math.min(duration,tick));
+        int lo=(int)tick,hi=Math.min(duration,lo+1);double f=tick-lo;
+        for(int i=0;i<6;i++)out[i]=p[i].length==1?p[i][0]:p[i][lo]+(p[i][hi]-p[i][lo])*f;
     }
     static final class Blend {
         double last=-1,weight,elapsed;

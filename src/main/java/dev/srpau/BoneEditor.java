@@ -918,9 +918,30 @@ final class BoneEditor {
                     hits.add(new CubeHit(owner,corners));
                 }
             }
+            if(!p.hidden&&textured&&project.metadata.contains(AdventurerBends.MARK))drawElbowSeam(n,time);
             if(!p.hidden&&n==attachedBone&&attachmentVisible)playerDummy.render(textured);
             if(!p.hidden)for(Node c:n.children)renderNode(c,local,owner,time,textured);
         }finally{GlStateManager.popMatrix();}
+    }
+    private void drawElbowSeam(Node n,float time){
+        String name=AdventurerBends.field(n.base);
+        if(!name.equals("arm")&&!name.equals("arm_1"))return;
+        Node upper=null,lower=null;
+        for(Node child:n.children){
+            if(child.geometry!=null&&Arrays.equals(child.base.dimensions,new int[]{4,6,4}))upper=child;
+            if(AdventurerBends.field(child.base).endsWith("Elbow"))lower=child;
+        }
+        if(upper==null||lower==null||upper.base.hidden)return;
+        eval(lower,time);
+        if(lower==selected&&preview&&proposed!=null)System.arraycopy(proposed,0,channel(lower),0,3);
+        if(lower.pose.hidden)return;
+        Mat transform=Mat.local(lower.pose);
+        double[] h=lower.base.position;
+        CubeInfo box=upper.base;
+        GlStateManager.color(1,1,1,1);
+        JointSeam.draw(box.offset[0],box.offset[1]+6,box.offset[2],4,4,box.txOffset[0],box.txOffset[1]+4,
+            project.textureWidth,project.textureHeight,box.txMirror,1F,
+            point->transform.point(point[0]-h[0],point[1]-h[1],point[2]-h[2]));
     }
     /** Same T * Rz * Ry * Rx * S local transform as viewport; only for picking and bounds. */
     private static final class Mat{

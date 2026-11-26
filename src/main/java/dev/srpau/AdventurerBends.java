@@ -11,7 +11,8 @@ import java.util.*;
  * Tabula box UVs, so even the stock editor and saved TBL can draw the split. */
 final class AdventurerBends {
     static final String MARK="srpau:adventurer-bends:v1";
-    static final String VISUAL_MARK="srpau:adventurer-bend-surfaces:v2";
+    static final String VISUAL_MARK="srpau:adventurer-bend-surfaces:v3";
+    private static final String OLD_VISUAL_MARK="srpau:adventurer-bend-surfaces:v2";
     private static final String[] PARTS={"arm","arm_1","leg","leg_1"};
     private static final String[] NAMES={"leftElbow","rightElbow","rightKnee","leftKnee"};
     private AdventurerBends(){}
@@ -105,18 +106,18 @@ final class AdventurerBends {
             CubeInfo upper=segments[i][0],lower=segments[i][1];
             int uu=upper.txOffset[0],uv=upper.txOffset[1],lu=lower.txOffset[0],lv=lower.txOffset[1];
             if(i<2){
-                // Same internal face visibility as player.json (elbows caps=false).
-                atlas.setRGB(uu+8,uv,4,4,new int[16],0,4);
-                atlas.setRGB(lu+4,lv,4,4,new int[16],0,4);
-                upper.mcScale+=.01D;
+                // Fill both exposed cut faces using the adjacent limb strip.
+                copy(src,atlas,uu+4,uv+6,4,4,uu+8,uv);
+                copy(src,atlas,lu+4,lv+4,4,4,lu+4,lv);
+                if(!p.metadata.contains(OLD_VISUAL_MARK))upper.mcScale+=.01D;
             }else{
                 // BoxSplitter shifts the lower top cap down by six source pixels.
                 // Those pixels already exist in the upper segment\u0027s side strip.
                 copy(src,atlas,uu+4,uv+6,4,4,lu+4,lv);
-                lower.mcScale+=.01D;
+                if(!p.metadata.contains(OLD_VISUAL_MARK))lower.mcScale+=.01D;
             }
         }
-        p.bufferedTexture=atlas;p.metadata.add(VISUAL_MARK);
+        p.bufferedTexture=atlas;p.metadata.remove(OLD_VISUAL_MARK);p.metadata.add(VISUAL_MARK);
         org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("Adventurer: updated bend seam surfaces without changing hinge pivots or animation keys.");
         return true;
     }

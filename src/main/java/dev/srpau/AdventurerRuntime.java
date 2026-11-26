@@ -27,7 +27,10 @@ public final class AdventurerRuntime {
     private final Map<EntityLivingBase,AdventurerIdle.Blend> idleStates=new WeakHashMap<>();
     private AdventurerIdle idle;
     private final double[] edit=new double[6];
-    private static final String[] UPPER={"","","0078_leg","0046_leg_1"};
+    private Rig idleRig;
+    private float[][] saved;
+    private boolean poseApplied;
+    private static final String[] UPPER={"0068_arm","0034_arm_1","0078_leg","0046_leg_1"};
     private static final String[] LOWER={"9000_leftElbow","9001_rightElbow","9002_rightKnee","9003_leftKnee"};
     private boolean initialized,failed;
     private Method status,flash,size;
@@ -50,29 +53,28 @@ public final class AdventurerRuntime {
         boolean arms=mob.getItemStackFromSlot(EntityEquipmentSlot.CHEST).isEmpty();
         try{
             if(!initialized){initialize(model,mob);initialized=true;}
+            boolean normal=normalState(mob);
+            boolean stationary=normal&&stationary(mob,amount);
+            float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
+            boolean fullIdle=idle!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
+            if(fullIdle){
+                AdventurerIdle.Blend blend=idleStates.computeIfAbsent(mob,e->new AdventurerIdle.Blend());
+                blend.update(mob.ticksExisted+pt,stationary,normal);
+                if(blend.weight>0)applyFullPose(AdventurerIdle.phase(blend.elapsed,idle.duration),blend.smooth());
+            }else idleStates.remove(mob);
             for(Limb l:limbs){
                 copy(l.original,l.upper);l.lower.rotateAngleX=l.lower.rotateAngleY=l.lower.rotateAngleZ=0;
                 l.lower.setRotationPoint((float)l.knee[0],(float)l.knee[1],(float)l.knee[2]);
             }
-            boolean normal=normalState(mob);
-            boolean stationary=normal&&stationary(mob,amount);
-            float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
-            if(idle!=null){
-                AdventurerIdle.Blend blend=idleStates.computeIfAbsent(mob,e->new AdventurerIdle.Blend());
-                blend.update(mob.ticksExisted+pt,stationary,normal);
+            if(fullIdle){
+                AdventurerIdle.Blend blend=idleStates.get(mob);
                 double t=AdventurerIdle.phase(blend.elapsed,idle.duration),weight=blend.smooth();
-                for(int i=0;i<4;i++){
-                    if(i<2?!arms:!legs)continue;
-                    applyEdit(limbs[i].upper,UPPER[i],t,weight);
-                    applyEdit(limbs[i].lower,LOWER[i],t,weight);
-                }
+                for(int i=0;i<4;i++)applyAbsolute(limbs[i].lower,LOWER[i],t,weight);
             }
-            // Let the authored knee pose settle before fixing world-space anchors.
-            // The solver targets the authored feet, not the original straight legs.
-            if(legs&&stationary&&(idle==null||idleStates.get(mob).weight>=1))plant(root,mob);
+            if(legs&&stationary&&(!fullIdle||idleStates.get(mob).weight>=1))plant(root,mob);
             else states.remove(mob);
         }catch(Exception|LinkageError e){
-            failed=true;states.clear();idleStates.clear();
+            restorePose();failed=true;states.clear();idleStates.clear();
             LogManager.getLogger("SRPAnimationUtil").warn("Adventurer Mo' Bends compatibility disabled; using original model",e);
             root.render(scale);return;
         }
@@ -91,6 +93,7 @@ public final class AdventurerRuntime {
             for(int i=0;i<4;i++)if((swapped&(1<<i))!=0){
                 Limb l=limbs[i];l.parent.childModels.set(l.slot,l.original);
             }
+            restorePose();
         }
     }
     private boolean normalState(EntityLivingBase e)throws Exception{
@@ -103,15 +106,38 @@ public final class AdventurerRuntime {
         double dx=e.posX-e.prevPosX,dz=e.posZ-e.prevPosZ;
         return amount<=.09F&&dx*dx+dz*dz<=.0004;
     }
-    private void applyEdit(ModelRenderer p,String name,double tick,double weight){
-        if(name.isEmpty()||weight<=0)return;
+    private static float mix(float a,double b,double w){return (float)(a+(b-a)*w);}
+    private static float angle(float a,double degrees,double w){
+        return a+(float)(Math.toRadians(MathHelper.wrapDegrees((float)(degrees-Math.toDegrees(a))))*w);
+    }
+    private void applyAbsolute(ModelRenderer p,String name,double tick,double weight){
+        if(weight<=0)return;
         idle.evaluate(name,tick,edit);
-        p.rotateAngleX+=(float)Math.toRadians(edit[0]*weight);
-        p.rotateAngleY+=(float)Math.toRadians(edit[1]*weight);
-        p.rotateAngleZ+=(float)Math.toRadians(edit[2]*weight);
-        p.rotationPointX+=(float)(edit[3]*weight);
-        p.rotationPointY+=(float)(edit[4]*weight);
-        p.rotationPointZ+=(float)(edit[5]*weight);
+        p.rotationPointX=mix(p.rotationPointX,edit[0]-16*p.offsetX,weight);
+        p.rotationPointY=mix(p.rotationPointY,edit[1]-16*p.offsetY,weight);
+        p.rotationPointZ=mix(p.rotationPointZ,edit[2]-16*p.offsetZ,weight);
+        p.rotateAngleX=angle(p.rotateAngleX,edit[3],weight);
+        p.rotateAngleY=angle(p.rotateAngleY,edit[4],weight);
+        p.rotateAngleZ=angle(p.rotateAngleZ,edit[5],weight);
+    }
+    private void applyFullPose(double tick,double weight){
+        // Snapshot all native fields before any edit; restore before armour/other entities.
+        for(int i=0;i<idleRig.bones.size();i++){
+            ModelRenderer p=idleRig.bones.get(i).part;float[] s=saved[i];
+            s[0]=p.rotationPointX;s[1]=p.rotationPointY;s[2]=p.rotationPointZ;
+            s[3]=p.rotateAngleX;s[4]=p.rotateAngleY;s[5]=p.rotateAngleZ;
+        }
+        poseApplied=true;
+        for(Rig.Bone b:idleRig.bones)applyAbsolute(b.part,b.name,tick,weight);
+    }
+    private void restorePose(){
+        if(!poseApplied)return;
+        for(int i=0;i<idleRig.bones.size();i++){
+            ModelRenderer p=idleRig.bones.get(i).part;float[] s=saved[i];
+            p.setRotationPoint(s[0],s[1],s[2]);
+            p.rotateAngleX=s[3];p.rotateAngleY=s[4];p.rotateAngleZ=s[5];
+        }
+        poseApplied=false;
     }
     private void plant(ModelRenderer root,EntityLivingBase mob){
         float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
@@ -176,7 +202,23 @@ public final class AdventurerRuntime {
             double[] foot=v((box.posX1+box.posX2)*.5,box.posY2-hinge[1],(box.posZ1+box.posZ2)*.5-hinge[2]);
             l.setRotationPoint((float)hinge[0],(float)hinge[1],(float)hinge[2]);
             split(o,box,u,l,knee);
-            u.addChild(l);limbs[i]=new Limb(o,p,u,l,slot,hinge,foot);
+            u.addChild(l);
+            if(!knee){
+                // Connect the two cut rings in upper-limb coordinates. Geometry
+                // follows the actual lower transform, including sideways bends.
+                final ModelRenderer lower=l;
+                final double[] h=hinge;
+                final int[] tex=i==0?new int[]{40,16}:new int[]{0,26};
+                u.addChild(new ModelRenderer(mesh){
+                    @Override public void render(float unit){
+                        Rot rot=rotation(lower);
+                        JointSeam.draw(box.posX1,h[1],box.posZ1,4,4,tex[0],tex[1]+4,
+                            model.textureWidth,model.textureHeight,o.mirror,unit,
+                            point->add(translation(lower),rot.apply(sub(point,h))));
+                    }
+                });
+            }
+            limbs[i]=new Limb(o,p,u,l,slot,hinge,foot);
         }
         try{
             AdventurerIdle candidate=AdventurerIdle.load();
@@ -187,8 +229,10 @@ public final class AdventurerRuntime {
                 if(rig.bones.stream().noneMatch(b->b.name.equals(UPPER[index])&&b.part==limbs[index].original))
                     throw new IllegalArgumentException("Unexpected authored limb "+UPPER[i]);
             }
-            idle=candidate;
-            LogManager.getLogger("SRPAnimationUtil").info("Adventurer authored idle loaded from ModelInfPlayer.tbl: four bend joints and two leg yaw edits.");
+            for(Rig.Bone b:rig.bones)if(!candidate.has(b.name))throw new IllegalArgumentException("Missing native bone "+b.name);
+            for(String name:LOWER)if(!candidate.has(name))throw new IllegalArgumentException("Missing bend "+name);
+            idleRig=rig;saved=new float[rig.bones.size()][6];idle=candidate;
+            LogManager.getLogger("SRPAnimationUtil").info("Adventurer authored idle loaded from ModelInfPlayer.tbl: full 94-bone absolute idle.");
         }catch(Exception|LinkageError ex){
             LogManager.getLogger("SRPAnimationUtil").warn("Authored Adventurer idle unavailable; keeping native split geometry and foot planting",ex);
         }
@@ -205,7 +249,7 @@ public final class AdventurerRuntime {
         for(int i=0;i<6;i++)for(int j=0;j<4;j++)uv[i][j]=face.getField(names[j]).getInt(Array.get(faces,i));
         Method split=splitter.getMethod("split",float[].class,float[].class,float[][].class,int.class,float[].class,int.class,int.class,boolean.class);
         List<?> segments=(List<?>)split.invoke(null,new float[]{source.posX1,source.posY1,source.posZ1},
-            new float[]{source.posX2,source.posY2,source.posZ2},uv,1,new float[]{.5F},2,knee?-1:1,knee);
+            new float[]{source.posX2,source.posY2,source.posZ2},uv,1,new float[]{.5F},2,knee?-1:1,true);
         Constructor<?> fc=face.getConstructor(int.class,int.class,int.class,int.class);
         for(int i=0;i<2;i++){
             Object seg=segments.get(i);Class<?> type=seg.getClass();
