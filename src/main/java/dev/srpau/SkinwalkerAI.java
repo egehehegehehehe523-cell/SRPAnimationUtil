@@ -27,6 +27,7 @@ public final class SkinwalkerAI {
             if(!entry.action.getClass().getSimpleName().equals("EntityAISwimmingDiving"))e.tasks.removeTask(entry.action);
         for(EntityAITasks.EntityAITaskEntry entry:new ArrayList<>(e.targetTasks.taskEntries))e.targetTasks.removeTask(entry.action);
         e.setAttackTarget(null);e.setSneaking(false);e.setSprinting(false);
+        SkinwalkerState.data(e).setBoolean("Peek",false);
         e.tasks.addTask(1,new Goal(e));
     }
     static final class Goal extends EntityAIBase {
@@ -37,7 +38,7 @@ public final class SkinwalkerAI {
         Vec3d destination;
         BlockPos cover;
         boolean peeking,fleeing;
-        int nextPlan,nextTarget,peekUntil,avoidUntil,fleeUntil;
+        int nextPlan,nextTarget,avoidUntil,fleeUntil,safeTicks,nextPassiveWalk;
         float coverYaw;
         final PeekLock lock=new PeekLock();
         BlockPos lastExposedCover;
@@ -46,7 +47,7 @@ public final class SkinwalkerAI {
         @Override public boolean shouldExecute(){return mob.isEntityAlive()&&!mob.isInWater()&&!mob.isInLava();}
         @Override public boolean shouldContinueExecuting(){return shouldExecute();}
         @Override public void resetTask(){clear();}
-        private void clear(){mob.getNavigator().clearPath();mob.setSneaking(false);mob.setSprinting(false);destination=null;cover=null;peeking=false;fleeing=false;lock.reset();}
+        private void clear(){mob.getNavigator().clearPath();mob.setSneaking(false);mob.setSprinting(false);destination=null;cover=null;peeking=false;fleeing=false;lock.reset();SkinwalkerState.peek(mob,false);}
         private Vec3d feet(){return new Vec3d(mob.posX,mob.posY,mob.posZ);}
         private boolean valid(EntityLivingBase p){
             if(p==null||!p.isEntityAlive()||p.world!=mob.world)return false;
@@ -189,11 +190,28 @@ public final class SkinwalkerAI {
             mob.setPosition(destination.x,destination.y,destination.z);
             mob.rotationYaw=coverYaw;mob.renderYawOffset=coverYaw;
             mob.getLookHelper().setLookPositionWithEntity(target,30,30);
-            mob.setSprinting(false);mob.setSneaking(true);
+            mob.setSprinting(false);mob.setSneaking(true);SkinwalkerState.peek(mob,true);
+        }
+        private void passive(int tick){
+            mob.setAttackTarget(null);mob.setSneaking(false);mob.setSprinting(false);
+            if(tick<nextPassiveWalk)return;
+            nextPassiveWalk=tick+60+mob.getRNG().nextInt(100);
+            if(!mob.getNavigator().noPath())return;
+            Vec3d point=RandomPositionGenerator.findRandomTarget(mob,6,2);
+            if(point!=null)mob.getNavigator().tryMoveToXYZ(point.x,point.y,point.z,1.0);
         }
         @Override public void updateTask(){
             int tick=mob.ticksExisted;
             refreshObservers(tick);
+            if(SkinwalkerState.disguised(mob)){passive(tick);return;}
+            // A learned identity is permanent. Wait for a genuinely unseen,
+            // grounded opportunity after ending the peek, even if target left.
+            if(SkinwalkerState.ready(mob)&&!peeking){
+                safeTicks=SeenProgress.safe(safeTicks,mob.onGround&&!seen(feet()));
+                if(safeTicks>=SeenProgress.SAFE_TICKS){
+                    clear();SkinwalkerState.disguise(mob);passive(tick);return;
+                }
+            }else safeTicks=0;
             if((!peeking&&tick>=nextTarget)||!valid(target)){
                 nextTarget=tick+20;EntityLivingBase n=nearest();
                 if(n!=target){clear();target=n;nextPlan=tick;}
@@ -207,7 +225,10 @@ public final class SkinwalkerAI {
                     !mob.world.getBlockState(cover).isFullCube()||!mob.world.getBlockState(cover.up()).isFullCube()||
                     feet().squareDistanceTo(destination)>.36||!fits(destination);
                 boolean detected=lock.retreat(tick);
-                if(invalid||detected||(!lock.detected()&&tick>=peekUntil)){
+                boolean observing=!invalid&&clearRay(peekHead(destination,coverYaw),target.getPositionEyes(1));
+                if(observing&&!detected)SkinwalkerState.observe(mob,target);
+                boolean learned=SkinwalkerState.ready(mob);
+                if(invalid||detected||(!lock.detected()&&(!observing||learned))){
                     if(lock.detected()||invalid){lastExposedCover=cover;avoidUntil=tick+100;fleeUntil=tick+30;}
                     clear();nextPlan=tick;
                 }else{holdPeek();return;}
@@ -237,8 +258,8 @@ public final class SkinwalkerAI {
                 mob.getNavigator().clearPath();mob.setSprinting(false);
                 // Visible head is allowed; detection starts the reaction
                 // timer, not an immediate cancellation of the authored pose.
-                if(!escaping&&!exposed&&clearRay(target.getPositionEyes(1),peekHead(destination,coverYaw))){
-                    peeking=true;peekUntil=tick+80;lock.reset();
+                if(!SkinwalkerState.ready(mob)&&!escaping&&!exposed&&clearRay(target.getPositionEyes(1),peekHead(destination,coverYaw))){
+                    peeking=true;lock.reset();
                     lock.detect(tick,headSeen(destination,coverYaw));holdPeek();return;
                 }
                 if(!escaping&&!exposed){destination=null;cover=null;nextPlan=tick+2;return;}

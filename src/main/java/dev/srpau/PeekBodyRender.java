@@ -11,7 +11,7 @@ public final class PeekBodyRender {
     @SubscribeEvent
     public void before(RenderLivingEvent.Pre<?> event){
         EntityLivingBase e=event.getEntity();
-        if(e.isSneaking()&&SkinwalkerAI.TYPE.equals(e.getClass().getName())){
+        if(SkinwalkerAI.TYPE.equals(e.getClass().getName())&&DisguiseRender.peeking(e)){
             e.renderYawOffset=e.rotationYaw;
             e.prevRenderYawOffset=e.prevRotationYaw;
         }

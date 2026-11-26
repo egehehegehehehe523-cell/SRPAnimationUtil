@@ -41,6 +41,8 @@ jobs:
           java -cp /tmp/srpau-gizmo-test dev.srpau.PursuitMotionTest
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/PeekLock.java tests/PeekLockTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.PeekLockTest
+          javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/SeenProgress.java tests/SeenProgressTest.java
+          java -cp /tmp/srpau-gizmo-test dev.srpau.SeenProgressTest
       - run: JAVA_HOME="$JAVA_HOME_17_X64" gradle --no-daemon build
       - uses: actions/upload-artifact@v4
         with:

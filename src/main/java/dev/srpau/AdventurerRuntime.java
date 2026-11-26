@@ -36,7 +36,7 @@ public final class AdventurerRuntime {
     private ModelRenderer head;
     private Rot headBind;
     private PeekPose peek;
-    private final Map<EntityLivingBase,AdventurerIdle.Blend> peekStates=new WeakHashMap<>();
+    private final Map<EntityLivingBase,SeenProgress.PeekBlend> peekStates=new WeakHashMap<>();
     private final float[] nativeHead=new float[3];
     private boolean headSaved;
     private final List<List<ModelRenderer>> armPaths=new ArrayList<>();
@@ -63,16 +63,18 @@ public final class AdventurerRuntime {
         EntityLivingBase mob=(EntityLivingBase)entity;
         boolean legs=mob.getItemStackFromSlot(EntityEquipmentSlot.LEGS).isEmpty()&&mob.getItemStackFromSlot(EntityEquipmentSlot.FEET).isEmpty();
         boolean arms=mob.getItemStackFromSlot(EntityEquipmentSlot.CHEST).isEmpty();
+        boolean activePeek=DisguiseRender.peeking(mob)&&mob.isEntityAlive();
+        if(activePeek){arms=true;legs=true;}
         try{
             if(!initialized){initialize(model,mob);initialized=true;}
             int parasiteStatus=((Number)status.invoke(mob)).intValue();
-            boolean normal=normalState(mob,parasiteStatus);
+            boolean normal=activePeek||normalState(mob,parasiteStatus);
             boolean running=WalkMotion.pursuitRun(parasiteStatus,mob.isSprinting());
             if(normal&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty())saveHead();
             double distance=Math.hypot(mob.posX-mob.prevPosX,mob.posZ-mob.prevPosZ);
             boolean testWalk=walk!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
-            boolean peekEligible=peek!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
-            boolean peekRequested=peekEligible&&normal&&mob.isSneaking();
+            boolean peekEligible=peek!=null;
+            boolean peekRequested=peekEligible&&activePeek;
             float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
             double now=mob.ticksExisted+pt;
             WalkMotion.State gait=null;
@@ -83,8 +85,8 @@ public final class AdventurerRuntime {
             boolean stationary=normal&&(peekRequested||(gait!=null?!gait.moving:stationary(mob,amount)));
             double peekWeight=0;
             if(peekEligible){
-                AdventurerIdle.Blend pb=peekStates.computeIfAbsent(mob,x->new AdventurerIdle.Blend());
-                pb.update(now,peekRequested,normal);
+                SeenProgress.PeekBlend pb=peekStates.computeIfAbsent(mob,x->new SeenProgress.PeekBlend());
+                pb.update(now,peekRequested);
                 peekWeight=pb.smooth();
             }else peekStates.remove(mob);
             if(!walkBlockedReported&&WalkMotion.moving(distance,amount,false)&&(!testWalk||!normal)){
