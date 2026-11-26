@@ -23,6 +23,8 @@ jobs:
           mkdir -p /tmp/srpau-gizmo-test
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/TransformGizmo.java tests/TransformGizmoTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.TransformGizmoTest
+          javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/KeyframeTiming.java src/main/java/dev/srpau/EditHistory.java tests/KeyframeTimingTest.java
+          java -cp /tmp/srpau-gizmo-test dev.srpau.KeyframeTimingTest
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/AdventurerUV.java tests/AdventurerUVTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.AdventurerUVTest
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/FootPlant.java tests/FootPlantTest.java

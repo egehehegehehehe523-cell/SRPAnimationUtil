@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.10 development prototype)
+# SRP Animation Util (0.1.11 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -48,3 +48,6 @@ When Mo' Bends Alpha.3 is installed, the Adventurer draws four split limbs via i
 0.1.9 fixes Adventurer limb splitting when iChunUtil truncates the 64x55 texture UV of the right leg to -1. Corrects native UV origins within one pixel, logs exact rejection reasons, and makes newly inserted hinges empty pivots. Existing native animation tracks and the original rig signature are preserved.
 
 0.1.10 retains Alpha.3's edge hinges at the halfway point of each limb. Existing split projects receive a one-time seam atlas upgrade without changing joint IDs, pivots or animation keys. Open elbow cut surfaces and knee cap texture sampling now follow player.json/BoxSplitter; the editor uses a tiny uniform inflation approximation for Tabula compatibility, gameplay uses the native X/Z inflation. Gizmos use 48.75 GUI-pixel radius and filled 3.5/5.5-pixel strokes rather than driver-dependent OpenGL line widths. Native captured animations still have zero added-joint rotation until keyed; world-space gameplay foot planting is not automatically baked into the editor.
+
+## Keyframe retiming and history
+Click a timeline diamond to select its channel and tick. Drag it horizontally to move it, or use Shift+Left/Right to nudge one game tick at a time (20 ticks/s). A key can meet, but not cross, its immediate channel neighbour. Moving a tick-1 key to tick 0 collapses the incoming ramp into an instantaneous native offset; an outgoing ramp is retimed to preserve its endpoint. Offset-only components display only their actual start key. Other bone/channel components are left unchanged; mixed components are split only when necessary. At a shared destination their additive effects combine, rather than overwriting the neighbouring pose. Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. History covers committed pose keys (including auto-key drags), retiming, clip creation, rename, loop changes and length extensions; last 64 edits within the open Animate session. It does not include camera, selection, temporary attachment or geometry migration changes and is not saved to TBL. Apply & back and save normally. No importer or gameplay changes.

@@ -55,6 +55,10 @@ final class BoneEditor {
     private double cx,cy,cz,extent=32,floorY=24;
     private double timelineZoom=1,timelineStart=0;
     private int timelineEnd, timelineTop;
+    private int keyTick=-1,keyChannel=-1,dragKeyTarget=-1,keyMouseStart;
+    private boolean dragKey,dragKeyMoved;
+    private final List<KeyMarker> keyMarkers=new ArrayList<>();
+    private final EditHistory history=new EditHistory();
     private double[] proposed;
     private String status="Select a bone, then drag its coloured handles.";
     private int w,h,left,right,top=43,bottom;
@@ -94,6 +98,10 @@ final class BoneEditor {
             double t=1-u-v;
             return Math.min(u,Math.min(v,t))>=-1e-6?u*a[2]+v*b[2]+t*c[2]:Double.NEGATIVE_INFINITY;
         }
+    }
+    private static final class KeyMarker{
+        final int tick,channel,x,y;
+        KeyMarker(int tick,int channel,int x,int y){this.tick=tick;this.channel=channel;this.x=x;this.y=y;}
     }
     private static final class Control{
         final int x,y,w,h;final Runnable action;
@@ -138,12 +146,12 @@ final class BoneEditor {
     }
     private void choose(Animation a){
         finishGizmo(false);
-        clip=a;frame=0;timelineStart=0;timelineZoom=1;playing=false;preview=false;proposed=null;
+        clearKey();clip=a;frame=0;timelineStart=0;timelineZoom=1;playing=false;preview=false;proposed=null;
         name.setText(a==null?"":a.name);refreshFields();
     }
-    private void select(Node n){finishGizmo(false);selected=n;preview=false;proposed=null;refreshFields();}
+    private void select(Node n){finishGizmo(false);clearKey();selected=n;preview=false;proposed=null;refreshFields();}
     private int length(){return clip==null?40:Math.max(1,clip.getLength());}
-    private void seek(int t){finishGizmo(false);frame=Math.max(0,Math.min(length(),t));playing=false;preview=false;proposed=null;refreshFields();}
+    private void seek(int t){finishGizmo(false);clearKey();frame=Math.max(0,Math.min(length(),t));playing=false;preview=false;proposed=null;refreshFields();}
     void tick(){
         if(!playing||clip==null)return;
         if(frame>=length()){
@@ -167,10 +175,11 @@ final class BoneEditor {
         double[] v=channel(selected);
         for(int i=0;i<3;i++)values[i].setText(String.format(Locale.ROOT,"%.4f",v[i]));
     }
-    private void setMode(int m){finishGizmo(false);mode=m;preview=false;proposed=null;refreshFields();}
+    private void setMode(int m){finishGizmo(false);clearKey();mode=m;preview=false;proposed=null;refreshFields();}
     private void togglePlayback(){
         finishGizmo(false);
         if(clip==null)return;
+        clearKey();
         if(!playing&&frame>=length())frame=0;
         playing=!playing;preview=false;proposed=null;refreshFields();
     }
@@ -198,7 +207,9 @@ final class BoneEditor {
             boolean changed=false;
             for(int i=0;i<3;i++){delta[i]=desired[i]-current[i];changed|=Math.abs(delta[i])>1e-7;}
             if(!changed){status="No transform change to key.";return;}
-            ArrayList<AnimationComponent> track=clip.sets.computeIfAbsent(selected.base.identifier,k->new ArrayList<>());
+            String id=selected.base.identifier;
+            ArrayList<AnimationComponent> before=copyTrack(clip,id);
+            ArrayList<AnimationComponent> track=clip.sets.computeIfAbsent(id,k->new ArrayList<>());
             int prev=0,next=Integer.MAX_VALUE;
             for(AnimationComponent c:track){
                 if(c.hidden||c.name.equals("Duration")||c.name.equals("End"))continue;
@@ -217,7 +228,9 @@ final class BoneEditor {
                 double[] reverse=component(out,false);
                 for(int i=0;i<3;i++)reverse[i]=-delta[i];track.add(out);
             }
-            Collections.sort(track);dirty=true;preview=false;proposed=null;refreshFields();
+            Collections.sort(track);recordTrack(clip,selected,id,before,copyTrack(clip,id),frame,frame,mode);
+            dirty=true;preview=false;proposed=null;refreshFields();
+            keyTick=frame;keyChannel=mode;
             status="Keyed "+selected.base.name+" at tick "+frame+".";
         }catch(RuntimeException ex){status="Enter finite transform values (scale > 0).";}
     }
@@ -235,11 +248,102 @@ final class BoneEditor {
         if(label.isEmpty()||clip!=null&&label.equals(clip.name))label="New animation";
         String base=label;int i=2;
         while(hasName(label))label=base+" "+i++;
+        Animation old=clip;int oldFrame=frame;
         Animation a=new Animation(label);duration(a,40);project.anims.add(a);dirty=true;choose(a);
+        history.record(()->{project.anims.remove(a);choose(old);seek(oldFrame);},()->{project.anims.add(a);choose(a);});
         status="New native Tabula clip. Select a bone and set keys.";
     }
     private boolean hasName(String name){for(Animation a:project.anims)if(a.name.equals(name))return true;return false;}
-    private void rename(){if(clip!=null&&!name.getText().trim().isEmpty()){clip.name=name.getText().trim();dirty=true;}}
+    private void rename(){
+        if(clip==null)return;
+        Animation a=clip;String old=a.name,next=name.getText().trim();
+        if(next.isEmpty()||old.equals(next))return;
+        a.name=next;dirty=true;
+        history.record(()->{a.name=old;focusClip(a);name.setText(old);},()->{a.name=next;focusClip(a);name.setText(next);});
+    }
+    private void toggleLoop(){
+        if(clip==null)return;
+        Animation a=clip;boolean old=a.loops;
+        a.loops=!old;dirty=true;
+        history.record(()->{a.loops=old;focusClip(a);},()->{a.loops=!old;focusClip(a);});
+    }
+    private void extendClip(){
+        if(clip==null||length()>=1200)return;
+        Animation a=clip;String id=bones.get(0).base.identifier;
+        ArrayList<AnimationComponent> before=copyTrack(a,id);
+        int at=frame;duration(a,Math.min(1200,length()+20));dirty=true;
+        recordTrack(a,selected,id,before,copyTrack(a,id),at,at,mode);
+    }
+    private void clearKey(){keyTick=-1;keyChannel=-1;dragKey=false;dragKeyMoved=false;dragKeyTarget=-1;}
+    private static ArrayList<AnimationComponent> copyTrack(Animation a,String id){
+        List<AnimationComponent> track=a.sets.get(id);
+        return track==null?null:new ArrayList<>(track);
+    }
+    private void focusClip(Animation a){
+        if(clip!=a)choose(a);
+        playing=false;preview=false;proposed=null;clearKey();
+        frame=Math.min(frame,length());refreshFields();
+    }
+    private void restoreTrack(Animation a,Node bone,String id,ArrayList<AnimationComponent> data,int at,int ch){
+        if(data==null)a.sets.remove(id);else a.sets.put(id,new ArrayList<>(data));
+        focusClip(a);selected=bone;mode=ch;seek(at);
+    }
+    private void recordTrack(Animation a,Node bone,String id,ArrayList<AnimationComponent> before,
+                             ArrayList<AnimationComponent> after,int from,int to,int ch){
+        history.record(()->restoreTrack(a,bone,id,before,from,ch),()->restoreTrack(a,bone,id,after,to,ch));
+    }
+    private void historyStep(boolean redo){
+        if(gizmoDrag!=null)finishGizmo(false);
+        clearKey();playing=false;preview=false;proposed=null;
+        name.setFocused(false);for(GuiTextField v:values)v.setFocused(false);
+        for(GuiTextField v:attachmentFields)v.setFocused(false);
+        boolean ok=redo?history.redo():history.undo();
+        if(ok){dirty=true;refreshFields();status=redo?"Redid animation edit.":"Undid animation edit.";}
+        else{refreshFields();status=redo?"Nothing to redo.":"Nothing to undo.";}
+    }
+    private NavigableSet<Integer> channelKeys(int ch){
+        return clip==null||selected==null?new TreeSet<>():KeyframeRetime.keys(clip.sets.get(selected.base.identifier),ch);
+    }
+    private boolean beginKeyDrag(int x,int y){
+        KeyMarker best=null;double distance=Double.POSITIVE_INFINITY;
+        for(KeyMarker k:keyMarkers){
+            double d=Math.hypot(x-k.x,y-k.y);
+            if(d<=6&&d<distance){distance=d;best=k;}
+        }
+        if(best==null)return false;
+        setMode(best.channel);seek(best.tick);
+        keyTick=best.tick;keyChannel=best.channel;dragKeyTarget=keyTick;
+        keyMouseStart=x;dragKey=true;dragKeyMoved=false;
+        status="Drag key to move; Shift+arrows nudge.";
+        return true;
+    }
+    private void updateKeyDrag(int x){
+        if(Math.abs(x-keyMouseStart)>=2)dragKeyMoved=true;
+        if(dragKeyMoved)dragKeyTarget=KeyframeTiming.destination(channelKeys(keyChannel),keyTick,timeAt(x),length());
+    }
+    private void finishKeyDrag(){
+        if(!dragKey)return;
+        int dest=dragKeyTarget;boolean moved=dragKeyMoved;
+        dragKey=false;dragKeyMoved=false;dragKeyTarget=-1;
+        if(moved)moveKey(dest);
+    }
+    private void moveKey(int requested){
+        if(clip==null||selected==null||keyTick<0||keyChannel<0)return;
+        int source=keyTick,ch=keyChannel,oldLength=length();
+        int dest=KeyframeTiming.destination(channelKeys(ch),source,requested,oldLength);
+        if(dest==source)return;
+        String id=selected.base.identifier;
+        ArrayList<AnimationComponent> before=copyTrack(clip,id);
+        if(before==null)return;
+        ArrayList<AnimationComponent> after=KeyframeRetime.move(before,ch,source,dest);
+        clip.sets.put(id,after);
+        if(length()<oldLength)after.add(new AnimationComponent("Duration",1,oldLength-1));
+        Collections.sort(after);
+        recordTrack(clip,selected,id,before,copyTrack(clip,id),source,dest,ch);
+        dirty=true;mode=ch;seek(dest);
+        keyTick=dest;keyChannel=ch;
+        status="Moved "+modeName()+" key "+source+" to "+dest+".";
+    }
     void dispose(){if(upgradedTexture!=null){upgradedTexture.deleteGlTexture();upgradedTexture=null;}}
     private void apply(){
         if(!dirty){BoneEditorEvents.close();return;}
@@ -334,7 +438,7 @@ final class BoneEditor {
         w=workspace.width;h=workspace.height;
         left=Math.min(200,Math.max(116,w*23/100));right=w-Math.min(175,Math.max(110,w/5));
         bottom=Math.max(top+85,h-Math.max(110,h*34/100));
-        controls.clear();hits.clear();gizmo=null;
+        controls.clear();hits.clear();keyMarkers.clear();gizmo=null;
         Gui.drawRect(0,0,w,h,BG);
         Gui.drawRect(0,0,w,22,PANEL);
         Gui.drawRect(0,23,left,h,PANEL);Gui.drawRect(right,23,w,h,PANEL);
@@ -342,11 +446,15 @@ final class BoneEditor {
         text("SRP | ANIMATE",6,7,ACCENT,105);
         button(w-144,3,72,16,"Apply & back",false,this::apply);
         button(w-68,3,64,16,"Cancel",false,()->{if(!dirty||status.equals("Cancel again to discard all changes."))BoneEditorEvents.close();else status="Cancel again to discard all changes.";});
-        text(dirty?"Unsaved edits":"Native Tabula project",115,7,MUTED,Math.max(0,w-265));
+        if(w>=380){
+            button(112,3,39,16,"Undo",history.canUndo(),()->historyStep(false));
+            button(154,3,39,16,"Redo",history.canRedo(),()->historyStep(true));
+            text(dirty?"Unsaved edits":"Native Tabula project",200,7,MUTED,Math.max(0,w-350));
+        }else text(dirty?"Unsaved edits":"Native Tabula project",115,7,MUTED,Math.max(0,w-265));
         panelTitle("ANIMATIONS",0,23,left);
         button(5,43,24,16,"+",false,this::newClip);
         button(32,43,45,16,"Rename",false,this::rename);
-        button(80,43,32,16,"Loop",clip!=null&&clip.loops,()->{if(clip!=null){clip.loops=!clip.loops;dirty=true;}});
+        button(80,43,32,16,"Loop",clip!=null&&clip.loops,this::toggleLoop);
         int keyPanel=Math.max(102,Math.min(h-172,h*48/100));
         int rows=Math.max(1,(keyPanel-64)/16);
         clipScroll=Math.max(0,Math.min(clipScroll,Math.max(0,project.anims.size()-rows)));
@@ -422,7 +530,7 @@ final class BoneEditor {
         button(mid-44,y,24,15,"|<",false,()->seek(0));
         button(mid-17,y,34,15,playing?"Pause":">",playing,this::togglePlayback);
         button(mid+20,y,24,15,">|",false,()->seek(length()));
-        button(left+4,y,40,15,"+20t",false,()->{if(clip!=null&&length()<1200){duration(clip,Math.min(1200,length()+20));dirty=true;}});
+        button(left+4,y,40,15,"+20t",false,this::extendClip);
         text(String.format(Locale.ROOT,"%.2fs / %.2fs",frame/20D,length()/20D),Math.max(left+46,right-91),y+4,FG,88);
         timelineTop=bottom+39;
         timelineEnd=h-15;
@@ -457,26 +565,34 @@ final class BoneEditor {
             List<AnimationComponent> track=clip.sets.get(selected.base.identifier);
             if(track!=null)for(int ch=0;ch<3;ch++){
                 int ky=ruler+13+ch*rowHeight+rowHeight/2;
-                Set<Integer> keys=new TreeSet<>();
-                for(AnimationComponent c:track)if(!c.hidden&&hasChannel(c,ch)){keys.add(c.startKey);keys.add(c.startKey+c.length);}
+                Set<Integer> keys=KeyframeRetime.keys(track,ch);
                 Integer previous=null;
                 for(int t:keys){
                     int px=timeX(t);
                     if(previous!=null){int a=Math.max(tx,timeX(previous)),b=Math.min(right-1,px);if(b>a)Gui.drawRect(a,ky,b,ky+1,0xff526179);}
-                    if(px>=tx+3&&px<right-3)diamond(px,ky,t==frame?0xfff0cd87:0xffa8b6d4);
+                    if(px>=tx&&px<right){
+                        int displayX=Math.max(tx+3,Math.min(right-4,px));
+                        boolean chosen=ch==keyChannel&&t==keyTick;
+                        diamond(displayX,ky,chosen?0xffffc46a:t==frame?0xfff0cd87:0xffa8b6d4);
+                        keyMarkers.add(new KeyMarker(t,ch,displayX,ky));
+                        if(chosen&&dragKey&&dragKeyTarget>=0&&dragKeyTarget!=t){
+                            int ghost=Math.max(tx+3,Math.min(right-4,timeX(dragKeyTarget)));
+                            diamond(ghost,ky,ACCENT);
+                        }
+                    }
                     previous=t;
                 }
             }
         }
         int pos=timeX(frame);if(pos>=tx&&pos<right){Gui.drawRect(pos,ty,pos+1,timelineEnd,ACCENT);Gui.drawRect(pos-3,ty,pos+4,ty+4,ACCENT);}
-        text("Wheel: zoom  |  Shift+wheel: pan",left+5,h-11,MUTED,right-left-10);
+        text(dragKey&&dragKeyTarget>=0?"Move key to tick "+dragKeyTarget:"Drag keys | Shift+arrows: nudge | Wheel: zoom",left+5,h-11,MUTED,right-left-10);
     }
     private double step(){return mode==0?.5:mode==1?5:.05;}
     private boolean viewport(int x,int y){return x>=left&&x<right&&y>=top&&y<bottom;}
     private void input(int mx,int my,int ty,int tx,int tw){
         boolean l=Mouse.isButtonDown(0),r=Mouse.isButtonDown(1);
         int wheel=Mouse.getDWheel();
-        if(wheel!=0&&gizmoDrag==null){
+        if(wheel!=0&&gizmoDrag==null&&!dragKey){
             if(viewport(mx,my))zoom=(float)Math.max(.15,Math.min(8,zoom*Math.pow(1.12,wheel/120D)));
             else if(mx>=timelineX()&&mx<right&&my>=timelineTop){
                 double anchor=timelineStart+(mx-timelineX())*visibleTicks()/timelineWidth();
@@ -487,14 +603,14 @@ final class BoneEditor {
             else if(mx<left)clipScroll-=Integer.signum(wheel)*3;
             else if(mx>=right)boneScroll-=Integer.signum(wheel)*3;
         }
-        if(gizmoDrag==null&&r&&rightDown&&viewport(mx,my)){yaw+=(mx-lastX)*.6F;pitch=Math.max(-89,Math.min(89,pitch+(my-lastY)*.6F));}
+        if(gizmoDrag==null&&!dragKey&&r&&rightDown&&viewport(mx,my)){yaw+=(mx-lastX)*.6F;pitch=Math.max(-89,Math.min(89,pitch+(my-lastY)*.6F));}
         if(l&&!leftDown){
             boolean field=name.mouseClicked(mx,my,0);for(GuiTextField v:values)field|=v.mouseClicked(mx,my,0);
             for(GuiTextField f:attachmentFields){if(attachedBone!=null&&attachmentSettings)field|=f.mouseClicked(mx,my,0);else f.setFocused(false);}
             if(!field){
                 boolean clicked=false;
                 for(Control c:controls)if(c.contains(mx,my)){c.action.run();clicked=true;break;}
-                if(!clicked&&mx>=tx&&mx<right&&my>=ty&&my<timelineEnd){dragTimeline=true;seek(timeAt(mx));}
+                if(!clicked&&mx>=tx&&mx<right&&my>=ty&&my<timelineEnd){if(!beginKeyDrag(mx,my)){dragTimeline=true;seek(timeAt(mx));}}
                 else if(!clicked&&viewport(mx,my)&&!beginGizmo(mx,my)){
                     Node best=null;double depth=Double.NEGATIVE_INFINITY;
                     for(CubeHit hit:hits){double z=hit.depthAt(mx,my);if(z>depth){depth=z;best=hit.owner;}}
@@ -502,19 +618,25 @@ final class BoneEditor {
                 }
             }
         }else if(l&&leftDown){
-            if(dragTimeline)seek(timeAt(mx));
+            if(dragKey)updateKeyDrag(mx);
+            else if(dragTimeline)seek(timeAt(mx));
             if(gizmoDrag!=null)updateGizmo(mx,my);
         }
-        if(!l){dragTimeline=false;finishGizmo(true);}
+        if(!l){if(dragKey&&leftDown){updateKeyDrag(mx);finishKeyDrag();}dragTimeline=false;finishGizmo(true);}
         leftDown=l;rightDown=r;lastX=mx;lastY=my;
     }
     void key(char c,int k){
         if(k==Keyboard.KEY_ESCAPE){
+            if(dragKey){dragKey=false;dragKeyMoved=false;dragKeyTarget=-1;return;}
             if(gizmoDrag!=null){finishGizmo(false);return;}
             if(dirty){status="Use Apply & back, or Cancel twice to discard.";}else BoneEditorEvents.close();
             return;
         }
-        if(gizmoDrag!=null)return;
+        if(net.minecraft.client.gui.GuiScreen.isCtrlKeyDown()){
+            if(k==Keyboard.KEY_Z){historyStep(net.minecraft.client.gui.GuiScreen.isShiftKeyDown());return;}
+            if(k==Keyboard.KEY_Y){historyStep(true);return;}
+        }
+        if(gizmoDrag!=null||dragKey)return;
         if(attachedBone!=null&&attachmentSettings)for(GuiTextField f:attachmentFields)if(f.isFocused()){
             if(k==Keyboard.KEY_RETURN){try{readAttachment();}catch(RuntimeException ignored){}refreshAttachmentFields();f.setFocused(false);}
             else if(f.textboxKeyTyped(c,k))try{readAttachment();}catch(RuntimeException ignored){}
@@ -528,7 +650,11 @@ final class BoneEditor {
         }
         if(k==Keyboard.KEY_G)setMode(0);else if(k==Keyboard.KEY_R)setMode(1);else if(k==Keyboard.KEY_S)setMode(2);
         else if(k==Keyboard.KEY_X)axis=0;else if(k==Keyboard.KEY_Y)axis=1;else if(k==Keyboard.KEY_Z)axis=2;
-        else if(k==Keyboard.KEY_LEFT)seek(frame-1);else if(k==Keyboard.KEY_RIGHT)seek(frame+1);
+        else if(k==Keyboard.KEY_LEFT||k==Keyboard.KEY_RIGHT){
+            int delta=k==Keyboard.KEY_LEFT?-1:1;
+            if(net.minecraft.client.gui.GuiScreen.isShiftKeyDown()&&keyTick>=0)moveKey(keyTick+delta);
+            else seek(frame+delta);
+        }
         else if(k==Keyboard.KEY_SPACE)togglePlayback();
         else if(k==Keyboard.KEY_RETURN)keyframe();
     }
