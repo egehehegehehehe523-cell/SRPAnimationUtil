@@ -5,7 +5,8 @@
   "package": "dev.srpau.mixin",
   "client": [
     "WindowImportMixin",
-    "WindowTopDockMixin"
+    "WindowTopDockMixin",
+    "AdventurerRenderMixin"
   ],
   "injectors": {
     "defaultRequire": 1
