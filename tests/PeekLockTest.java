@@ -15,6 +15,11 @@ public final class PeekLockTest {
             check(Math.abs(dx*f[1]-dz*f[0]-.5)<1e-8,"left");
             double yaw=Math.toRadians(PeekLock.yaw(f[0],f[1]));
             check(Math.abs(-Math.sin(yaw)-f[0])<1e-6&&Math.abs(Math.cos(yaw)-f[1])<1e-6,"facing");
+            double[] h=PeekLock.head(a[0],a[1],a[2],PeekLock.yaw(f[0],f[1]));
+            check(Math.abs((h[0]-a[0])*f[1]-(h[2]-a[2])*f[0]-.457)<1e-6,"authored head left offset");
+            check(Math.abs((h[0]-a[0])*f[0]+(h[2]-a[2])*f[1]+.127)<1e-6,"authored head depth");
+            check(PeekLock.behindFace(4.5,5.5,4.5+5*f[0],5.5+5*f[1],PeekLock.yaw(f[0],f[1])),"observer in front");
+            check(!PeekLock.behindFace(4.5,5.5,4.5-5*f[0],5.5-5*f[1],PeekLock.yaw(f[0],f[1])),"observer behind");
         }
         System.out.println("Peek anchor, fixed facing and 10-tick reaction tests passed");
     }

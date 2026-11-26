@@ -103,14 +103,24 @@ public final class SkinwalkerAI {
             return false;
         }
         private Vec3d peekHead(Vec3d p,float yaw){
-            double a=Math.toRadians(yaw);
-            return p.add(Math.cos(a)*.8,1.75,Math.sin(a)*.8);
+            double[] h=PeekLock.head(p.x,p.y,p.z,yaw);
+            return new Vec3d(h[0],h[1],h[2]);
         }
         private boolean headSeen(Vec3d p,float yaw){
             Vec3d head=peekHead(p,yaw);
             for(EntityPlayer observer:mob.world.playerEntities)if(valid(observer)&&visible(observer,head))return true;
             for(EntityArmorStand observer:testObservers)if(valid(observer)&&visible(observer,head))return true;
             return false;
+        }
+        private boolean anchoredCover(Vec3d observer,Vec3d p,BlockPos b,float yaw){
+            if(b==null||!mob.world.isBlockLoaded(b)||!mob.world.isBlockLoaded(b.up())||
+                !mob.world.getBlockState(b).isFullCube()||!mob.world.getBlockState(b.up()).isFullCube())return false;
+            if(!PeekLock.behindFace(b.getX()+.5,b.getZ()+.5,observer.x,observer.z,yaw))return false;
+            // A different obstruction must not validate an unrelated pillar.
+            RayTraceResult hit=mob.world.rayTraceBlocks(observer,p.add(0,.85,0),false,true,false);
+            if(hit==null||hit.typeOfHit!=RayTraceResult.Type.BLOCK)return false;
+            BlockPos h=hit.getBlockPos();
+            return b.equals(h)||b.up().equals(h);
         }
         private boolean fits(Vec3d p){
             BlockPos at=new BlockPos(p);
@@ -148,7 +158,7 @@ public final class SkinwalkerAI {
                     if(!fits(p))continue;
                     // Feet/body must be concealed; the authored upper-body
                     // lean should have a sight line around the left edge.
-                    if(clearRay(observer,p.add(0,.8,0)))continue;
+                    if(!anchoredCover(observer,p,b,yaw))continue;
                     boolean headClear=clearRay(observer,peekHead(p,yaw));
                     if(!escaping&&!headClear)continue;
                     if(seen(p))continue;
@@ -192,7 +202,7 @@ public final class SkinwalkerAI {
             mob.setPosition(destination.x,destination.y,destination.z);
             mob.rotationYaw=coverYaw;mob.renderYawOffset=coverYaw;
             mob.getLookHelper().setLookPositionWithEntity(target,30,30);
-            mob.setSprinting(false);mob.setSneaking(true);SkinwalkerState.peek(mob,true);
+            mob.setSprinting(false);mob.setSneaking(true);SkinwalkerState.peek(mob,true,coverYaw);
         }
         // Short, purposeful action bouts rather than a continuous mob wander.
         // All item changes are visual only; no interaction or inventory on mob.
@@ -270,8 +280,7 @@ public final class SkinwalkerAI {
             if(peeking){
                 boolean caught=exposed||headSeen(destination,coverYaw);
                 lock.detect(tick,caught);
-                boolean invalid=cover==null||!mob.world.isBlockLoaded(cover)||!mob.world.isBlockLoaded(cover.up())||
-                    !mob.world.getBlockState(cover).isFullCube()||!mob.world.getBlockState(cover.up()).isFullCube()||
+                boolean invalid=!anchoredCover(target.getPositionEyes(1),destination,cover,coverYaw)||
                     feet().squareDistanceTo(destination)>.36||!fits(destination);
                 boolean detected=lock.retreat(tick);
                 boolean observing=!invalid&&clearRay(peekHead(destination,coverYaw),target.getPositionEyes(1));
@@ -307,7 +316,7 @@ public final class SkinwalkerAI {
                 mob.getNavigator().clearPath();mob.setSprinting(false);
                 // Visible head is allowed; detection starts the reaction
                 // timer, not an immediate cancellation of the authored pose.
-                if(!SkinwalkerState.ready(mob)&&!escaping&&!exposed&&clearRay(target.getPositionEyes(1),peekHead(destination,coverYaw))){
+                if(!SkinwalkerState.ready(mob)&&!escaping&&!exposed&&anchoredCover(target.getPositionEyes(1),destination,cover,coverYaw)&&clearRay(target.getPositionEyes(1),peekHead(destination,coverYaw))){
                     peeking=true;lock.reset();
                     lock.detect(tick,headSeen(destination,coverYaw));holdPeek();return;
                 }

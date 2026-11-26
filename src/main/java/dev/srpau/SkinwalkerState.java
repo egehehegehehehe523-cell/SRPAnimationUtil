@@ -89,14 +89,18 @@ final class SkinwalkerState {
     static NBTTagCompound visual(EntityLivingBase e){
         NBTTagCompound d=data(e),out=new NBTTagCompound();
         out.setBoolean("Peek",d.getBoolean("Peek"));
+        if(d.getBoolean("Peek"))out.setFloat("PeekYaw",d.getFloat("PeekYaw"));
         out.setBoolean("Disguised",d.getBoolean("Disguised"));
         if(d.getBoolean("Disguised"))out.setTag("Identity",d.getCompoundTag("Identity").copy());
         return out;
     }
-    static void peek(EntityLivingBase e,boolean value){
+    static void peek(EntityLivingBase e,boolean value){peek(e,value,0);}
+    static void peek(EntityLivingBase e,boolean value,float yaw){
         NBTTagCompound d=data(e);
-        if(d.getBoolean("Peek")==value)return;
-        d.setBoolean("Peek",value);SkinwalkerNetwork.sync(e);
+        if(d.getBoolean("Peek")==value&&(!value||d.getFloat("PeekYaw")==yaw))return;
+        d.setBoolean("Peek",value);
+        if(value)d.setFloat("PeekYaw",yaw);
+        SkinwalkerNetwork.sync(e);
     }
     static void disguise(EntityLivingBase e){
         NBTTagCompound d=data(e);if(!ready(e)||disguised(e))return;

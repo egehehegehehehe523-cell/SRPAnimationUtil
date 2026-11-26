@@ -37,6 +37,10 @@ public final class DisguiseRender {
         NBTTagCompound s=STATES.get(e.getUniqueID());
         return s!=null?s.getBoolean("Peek"):e.isSneaking();
     }
+    static float peekYaw(EntityLivingBase e){
+        NBTTagCompound s=STATES.get(e.getUniqueID());
+        return s!=null&&s.getBoolean("Peek")&&s.hasKey("PeekYaw")?s.getFloat("PeekYaw"):e.rotationYaw;
+    }
     @SubscribeEvent public void unload(WorldEvent.Unload event){
         if(event.getWorld().isRemote){STATES.clear();PROXIES.clear();}
     }
