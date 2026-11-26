@@ -14,7 +14,7 @@ import java.util.*;
  * handles obstacles; only this entity type has its AI changed. Sneaking is the
  * synchronized visual peek flag, sprinting is the synchronized run flag. */
 public final class SkinwalkerAI {
-    private static final String TYPE="com.dhanantry.scapeandrunparasites.entity.monster.infected.EntityInfPlayer";
+    static final String TYPE="com.dhanantry.scapeandrunparasites.entity.monster.infected.EntityInfPlayer";
     @SubscribeEvent
     public void join(EntityJoinWorldEvent event){
         if(event.getWorld().isRemote||!TYPE.equals(event.getEntity().getClass().getName())||!(event.getEntity() instanceof EntityCreature))return;
@@ -34,14 +34,16 @@ public final class SkinwalkerAI {
         Vec3d destination;
         BlockPos cover;
         boolean peeking,fleeing;
-        int nextPlan,nextTarget,peekUntil,avoidUntil;
+        int nextPlan,nextTarget,peekUntil,avoidUntil,fleeUntil;
+        float coverYaw;
+        final PeekLock lock=new PeekLock();
         BlockPos lastExposedCover;
         double speed=1.8;
         Goal(EntityCreature mob){this.mob=mob;setMutexBits(3);}
         @Override public boolean shouldExecute(){return mob.isEntityAlive()&&!mob.isInWater()&&!mob.isInLava();}
         @Override public boolean shouldContinueExecuting(){return shouldExecute();}
         @Override public void resetTask(){clear();}
-        private void clear(){mob.getNavigator().clearPath();mob.setSneaking(false);mob.setSprinting(false);destination=null;cover=null;peeking=false;fleeing=false;}
+        private void clear(){mob.getNavigator().clearPath();mob.setSneaking(false);mob.setSprinting(false);destination=null;cover=null;peeking=false;fleeing=false;lock.reset();}
         private Vec3d feet(){return new Vec3d(mob.posX,mob.posY,mob.posZ);}
         private static boolean valid(EntityPlayer p){return p!=null&&p.isEntityAlive()&&!p.isSpectator()&&!p.capabilities.isCreativeMode;}
         private EntityPlayer nearest(){
@@ -56,23 +58,22 @@ public final class SkinwalkerAI {
         }
         private boolean visible(EntityPlayer p,Vec3d point){
             Vec3d eye=p.getPositionEyes(1),delta=point.subtract(eye);
-            double len=delta.lengthVector();if(len>48||len<1e-6)return len<1e-6;
+            double len=Math.sqrt(delta.x*delta.x+delta.y*delta.y+delta.z*delta.z);if(len>48||len<1e-6)return len<1e-6;
             // Generous 120-degree total view cone to account for camera FOV.
             return p.getLook(1).dotProduct(delta.scale(1/len))>.5&&clearRay(eye,point);
         }
         private boolean seen(Vec3d pos){
             // No scan of unrelated mobs. Check player observers only.
             for(EntityPlayer p:mob.world.playerEntities)if(valid(p)&&p.getDistanceSq(pos.x,pos.y,pos.z)<48*48&&
-                (visible(p,pos.addVector(0,1.55,0))||visible(p,pos.addVector(0,.7,0))))return true;
+                (visible(p,pos.add(0,1.55,0))||visible(p,pos.add(0,.7,0))))return true;
             return false;
         }
-        private Vec3d peekHead(Vec3d p,BlockPos b){
-            double x=target.posX-(b.getX()+.5),z=target.posZ-(b.getZ()+.5);
-            double fx=Math.abs(x)>=Math.abs(z)?Math.signum(x):0,fz=fx==0?Math.signum(z):0;
-            return p.addVector(fz*.8,1.75,-fx*.8);
+        private Vec3d peekHead(Vec3d p,float yaw){
+            double a=Math.toRadians(yaw);
+            return p.add(Math.cos(a)*.8,1.75,Math.sin(a)*.8);
         }
-        private boolean headSeen(Vec3d p,BlockPos b){
-            Vec3d head=peekHead(p,b);
+        private boolean headSeen(Vec3d p,float yaw){
+            Vec3d head=peekHead(p,yaw);
             for(EntityPlayer observer:mob.world.playerEntities)if(valid(observer)&&visible(observer,head))return true;
             return false;
         }
@@ -84,8 +85,8 @@ public final class SkinwalkerAI {
                 !mob.world.getCollisionBoxes(mob,bb.offset(0,-.18,0)).isEmpty()&&!mob.world.containsAnyLiquid(bb);
         }
         private static final class Candidate{
-            final Vec3d p;final BlockPos block;final double score;
-            Candidate(Vec3d p,BlockPos b,double s){this.p=p;block=b;score=s;}
+            final Vec3d p;final BlockPos block;final double score;final float yaw;
+            Candidate(Vec3d p,BlockPos b,double s,float yaw){this.p=p;block=b;score=s;this.yaw=yaw;}
         }
         private boolean chooseCover(boolean escaping){
             World w=mob.world;BlockPos origin=new BlockPos(mob);
@@ -106,17 +107,19 @@ public final class SkinwalkerAI {
                     double fx=Math.abs(x)>=Math.abs(z)?Math.signum(x):0;
                     double fz=fx==0?Math.signum(z):0;
                     if(fx==0&&fz==0)continue;
-                    Vec3d p=new Vec3d(cx-fx*.85+fz*.5,b.getY(),cz-fz*.85-fx*.5);
+                    double[] anchor=PeekLock.anchor(cx,b.getY(),cz,fx,fz);
+                    Vec3d p=new Vec3d(anchor[0],anchor[1],anchor[2]);
+                    float yaw=PeekLock.yaw(fx,fz);
                     if(!fits(p))continue;
                     // Feet/body must be concealed; the authored upper-body
                     // lean should have a sight line around the left edge.
-                    if(clearRay(observer,p.addVector(0,.8,0)))continue;
-                    boolean headClear=clearRay(observer,p.addVector(fz*.8,1.75,-fx*.8));
-                    if(!escaping&&(!headClear||headSeen(p,b)))continue;
+                    if(clearRay(observer,p.add(0,.8,0)))continue;
+                    boolean headClear=clearRay(observer,peekHead(p,yaw));
+                    if(!escaping&&!headClear)continue;
                     if(seen(p))continue;
                     double dd=p.squareDistanceTo(here),td=p.squareDistanceTo(new Vec3d(target.posX,target.posY,target.posZ));
                     if(td<9||dd<.05)continue;
-                    choices.add(new Candidate(p,b,dd+(headClear?0:8)+(escaping?Math.max(0,64-td)*.35:Math.abs(Math.sqrt(td)-9))));
+                    choices.add(new Candidate(p,b,dd+(headClear?0:8)+(escaping?Math.max(0,64-td)*.35:Math.abs(Math.sqrt(td)-9))+(headSeen(p,yaw)?3:0),yaw));
                 }
             }
             choices.sort(Comparator.comparingDouble(c->c.score));
@@ -128,14 +131,14 @@ public final class SkinwalkerAI {
                 net.minecraft.pathfinding.PathPoint end=path.getFinalPathPoint();
                 if(c.p.squareDistanceTo(new Vec3d(end.x+.5,end.y,end.z+.5))>2.5)continue;
                 if(mob.getNavigator().setPath(path,speed)){
-                    destination=c.p;cover=c.block;return true;
+                    destination=c.p;cover=c.block;coverYaw=c.yaw;return true;
                 }
             }
             return false;
         }
         private void retreat(){
             Vec3d away=feet().subtract(new Vec3d(target.posX,mob.posY,target.posZ)).normalize();
-            if(away.lengthVector()<.1)away=new Vec3d(1,0,0);
+            if(away.x*away.x+away.z*away.z<.01)away=new Vec3d(1,0,0);
             for(int i=0;i<3;i++){
                 double angle=(i==0?0:i==1?.65:-.65);
                 Vec3d v=new Vec3d(away.x*Math.cos(angle)-away.z*Math.sin(angle),0,away.x*Math.sin(angle)+away.z*Math.cos(angle));
@@ -143,28 +146,40 @@ public final class SkinwalkerAI {
                 if(mob.getNavigator().tryMoveToXYZ(p.x,p.y,p.z,speed)){destination=p;cover=null;return;}
             }
         }
-        private void face(){
-            double dx=target.posX-mob.posX,dz=target.posZ-mob.posZ;
-            float yaw=(float)(Math.atan2(dz,dx)*180/Math.PI)-90;
-            mob.rotationYaw=yaw;mob.rotationYawHead=yaw;mob.renderYawOffset=yaw;
+        private void holdPeek(){
+            // Lock to the chosen world-space anchor and block face, not the
+            // changing player angle. Only correct small residual drift.
+            mob.getNavigator().clearPath();
+            mob.getMoveHelper().setMoveTo(destination.x,destination.y,destination.z,0);
+            mob.setAIMoveSpeed(0);
+            mob.moveForward=0;mob.moveStrafing=0;
+            mob.motionX=0;mob.motionZ=0;
+            mob.setPosition(destination.x,destination.y,destination.z);
+            mob.rotationYaw=coverYaw;mob.renderYawOffset=coverYaw;
             mob.getLookHelper().setLookPositionWithEntity(target,30,30);
+            mob.setSprinting(false);mob.setSneaking(true);
         }
         @Override public void updateTask(){
             int tick=mob.ticksExisted;
-            if(tick>=nextTarget||!valid(target)){
+            if((!peeking&&tick>=nextTarget)||!valid(target)){
                 nextTarget=tick+20;EntityPlayer n=nearest();
                 if(n!=target){clear();target=n;nextPlan=tick;}
             }
             if(!valid(target)){clear();return;}
             boolean exposed=seen(feet());
             if(peeking){
-                boolean caught=exposed||headSeen(feet(),cover);
-                if(caught||tick>=peekUntil||!mob.world.getBlockState(cover).isFullCube()){
-                    if(caught){lastExposedCover=cover;avoidUntil=tick+100;}
-                    clear();nextPlan=tick;fleeing=caught;exposed|=caught;
-                }else{face();mob.setSneaking(true);return;}
+                boolean caught=exposed||headSeen(destination,coverYaw);
+                lock.detect(tick,caught);
+                boolean invalid=cover==null||!mob.world.isBlockLoaded(cover)||!mob.world.isBlockLoaded(cover.up())||
+                    !mob.world.getBlockState(cover).isFullCube()||!mob.world.getBlockState(cover.up()).isFullCube()||
+                    feet().squareDistanceTo(destination)>.36||!fits(destination);
+                boolean detected=lock.retreat(tick);
+                if(invalid||detected||(!lock.detected()&&tick>=peekUntil)){
+                    if(lock.detected()||invalid){lastExposedCover=cover;avoidUntil=tick+100;fleeUntil=tick+30;}
+                    clear();nextPlan=tick;
+                }else{holdPeek();return;}
             }
-            boolean escaping=exposed||mob.getDistanceSq(target)<9;
+            boolean escaping=exposed||tick<fleeUntil||mob.getDistanceSq(target)<9;
             if(escaping&&!fleeing){mob.getNavigator().clearPath();destination=null;cover=null;nextPlan=tick;}
             fleeing=escaping;
             mob.setSprinting(escaping);
@@ -187,7 +202,13 @@ public final class SkinwalkerAI {
                     return;
                 }
                 mob.getNavigator().clearPath();mob.setSprinting(false);
-                if(!exposed&&!headSeen(feet(),cover)){peeking=true;peekUntil=tick+80;mob.setSneaking(true);face();return;}
+                // Visible head is allowed; detection starts the reaction
+                // timer, not an immediate cancellation of the authored pose.
+                if(!escaping&&!exposed&&clearRay(target.getPositionEyes(1),peekHead(destination,coverYaw))){
+                    peeking=true;peekUntil=tick+80;lock.reset();
+                    lock.detect(tick,headSeen(destination,coverYaw));holdPeek();return;
+                }
+                if(!escaping&&!exposed){destination=null;cover=null;nextPlan=tick+2;return;}
                 lastExposedCover=cover;avoidUntil=tick+60;
                 destination=null;cover=null;
             }

@@ -5,5 +5,6 @@ final class ClientBootstrap {
     static void init(){
         MinecraftForge.EVENT_BUS.register(new ClientHooks());
         MinecraftForge.EVENT_BUS.register(new BoneEditorEvents());
+        MinecraftForge.EVENT_BUS.register(new PeekBodyRender());
     }
 }

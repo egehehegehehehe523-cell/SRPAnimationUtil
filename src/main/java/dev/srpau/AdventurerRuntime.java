@@ -71,19 +71,20 @@ public final class AdventurerRuntime {
             if(normal&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty())saveHead();
             double distance=Math.hypot(mob.posX-mob.prevPosX,mob.posZ-mob.prevPosZ);
             boolean testWalk=walk!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
+            boolean peekEligible=peek!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
+            boolean peekRequested=peekEligible&&normal&&mob.isSneaking();
             float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
             double now=mob.ticksExisted+pt;
             WalkMotion.State gait=null;
             if(testWalk){
                 gait=walkStates.computeIfAbsent(mob,x->new WalkMotion.State());
-                gait.update(now,swing,distance,amount,normal,running&&walk.hasRun());
+                gait.update(now,swing,distance,amount,normal&&!peekRequested,running&&walk.hasRun());
             }else walkStates.remove(mob);
-            boolean stationary=normal&&(gait!=null?!gait.moving:stationary(mob,amount));
-            boolean peekEligible=peek!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
+            boolean stationary=normal&&(peekRequested||(gait!=null?!gait.moving:stationary(mob,amount)));
             double peekWeight=0;
             if(peekEligible){
                 AdventurerIdle.Blend pb=peekStates.computeIfAbsent(mob,x->new AdventurerIdle.Blend());
-                pb.update(now,mob.isSneaking()&&stationary,normal);
+                pb.update(now,peekRequested,normal);
                 peekWeight=pb.smooth();
             }else peekStates.remove(mob);
             if(!walkBlockedReported&&WalkMotion.moving(distance,amount,false)&&(!testWalk||!normal)){
@@ -118,7 +119,7 @@ public final class AdventurerRuntime {
                 }
                 applyWalk(gait,lookYaw);
             }
-            if(legs&&stationary&&peekWeight==0&&(gait==null||gait.weight==0)&&(!fullIdle||idleStates.get(mob).weight>=1))plant(rootProxy,mob,arms);
+            if(legs&&stationary&&!peekRequested&&peekWeight==0&&(gait==null||gait.weight==0)&&(!fullIdle||idleStates.get(mob).weight>=1))plant(rootProxy,mob,arms);
             else{states.remove(mob);balances.remove(mob);}
             if(headSaved)applyLook(lookYaw,lookPitch,gait);
             if(peekWeight>0)peek.apply(peekWeight);
