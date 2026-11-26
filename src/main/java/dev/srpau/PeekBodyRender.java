@@ -7,7 +7,7 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 /** Entity yaw is sent by vanilla tracking; renderYawOffset is client-derived.
  * Keep the latter aligned with the server's fixed cover-facing yaw for peek.
  * The head remains free to follow its own synchronized look direction. */
-final class PeekBodyRender {
+public final class PeekBodyRender {
     @SubscribeEvent
     public void before(RenderLivingEvent.Pre<?> event){
         EntityLivingBase e=event.getEntity();
