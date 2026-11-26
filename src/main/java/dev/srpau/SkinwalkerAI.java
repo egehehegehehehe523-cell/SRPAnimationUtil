@@ -50,7 +50,10 @@ public final class SkinwalkerAI {
         private Vec3d feet(){return new Vec3d(mob.posX,mob.posY,mob.posZ);}
         private boolean valid(EntityLivingBase p){
             if(p==null||!p.isEntityAlive()||p.world!=mob.world)return false;
-            if(p instanceof EntityPlayer)return !p.isSpectator()&&!((EntityPlayer)p).capabilities.isCreativeMode;
+            if(p instanceof EntityPlayer){
+                EntityPlayer player=(EntityPlayer)p;
+                return !player.isSpectator()&&!player.capabilities.isCreativeMode;
+            }
             return p instanceof EntityArmorStand;
         }
         private void refreshObservers(int tick){
