@@ -56,8 +56,11 @@ final class FootPlant {
     // Knee and foot vectors are the actual front-edge hinge geometry, not assumed
     // six-unit centre pivots. Preserve native joint twist by minimal corrections.
     static Solution solve(Rot nativeUpper,double[] knee,double[] foot,double[] target){
+        return solve(nativeUpper,Rot.identity(),knee,foot,target);
+    }
+    static Solution solve(Rot nativeUpper,Rot authoredLower,double[] knee,double[] foot,double[] target){
         double a=len(knee),b=len(foot),d=len(target);
-        if(d<1e-7||a<1e-7||b<1e-7)return new Solution(nativeUpper,Rot.identity());
+        if(d<1e-7||a<1e-7||b<1e-7)return new Solution(nativeUpper,authoredLower);
         double[] dir=unit(target);
         d=clamp(d,Math.abs(a-b)+.001,a+b-.001);
         double along=(a*a+d*d-b*b)/(2*d);
@@ -68,7 +71,7 @@ final class FootPlant {
         if(len(pole)<1e-6){double[] side=v(1,0,0);pole=sub(side,mul(dir,dot(side,dir)));}
         double[] k=add(mul(dir,along),mul(unit(pole),height));
         Rot upper=Rot.align(nk,k).mul(nativeUpper);
-        Rot lower=Rot.align(foot,upper.inv().apply(sub(mul(dir,d),k)));
+        Rot lower=Rot.align(authoredLower.apply(foot),upper.inv().apply(sub(mul(dir,d),k))).mul(authoredLower);
         return new Solution(upper,lower);
     }
     /** One foot steps at a time; the other remains locked in world space.

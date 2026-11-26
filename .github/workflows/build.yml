@@ -29,6 +29,8 @@ jobs:
           java -cp /tmp/srpau-gizmo-test dev.srpau.AdventurerUVTest
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/FootPlant.java tests/FootPlantTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.FootPlantTest
+          javac -cp /tmp/srpau-gizmo-test -d /tmp/srpau-gizmo-test tests/AuthoredFootTest.java
+          java -cp /tmp/srpau-gizmo-test dev.srpau.AuthoredFootTest
       - run: JAVA_HOME="$JAVA_HOME_17_X64" gradle --no-daemon build
       - uses: actions/upload-artifact@v4
         with:

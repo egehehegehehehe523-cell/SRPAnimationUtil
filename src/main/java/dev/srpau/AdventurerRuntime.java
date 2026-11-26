@@ -24,6 +24,11 @@ import static dev.srpau.FootPlant.*;
 public final class AdventurerRuntime {
     private final Limb[] limbs=new Limb[4];
     private final Map<EntityLivingBase,State> states=new WeakHashMap<>();
+    private final Map<EntityLivingBase,AdventurerIdle.Blend> idleStates=new WeakHashMap<>();
+    private AdventurerIdle idle;
+    private final double[] edit=new double[6];
+    private static final String[] UPPER={"","","0078_leg","0046_leg_1"};
+    private static final String[] LOWER={"9000_leftElbow","9001_rightElbow","9002_rightKnee","9003_leftKnee"};
     private boolean initialized,failed;
     private Method status,flash,size;
     private static final String[] PARTS={"arm","arm_1","leg","leg_1"};
@@ -47,11 +52,27 @@ public final class AdventurerRuntime {
             if(!initialized){initialize(model,mob);initialized=true;}
             for(Limb l:limbs){
                 copy(l.original,l.upper);l.lower.rotateAngleX=l.lower.rotateAngleY=l.lower.rotateAngleZ=0;
+                l.lower.setRotationPoint((float)l.knee[0],(float)l.knee[1],(float)l.knee[2]);
             }
-            if(legs&&canPlant(mob,amount))plant(root,mob);
+            boolean normal=normalState(mob);
+            boolean stationary=normal&&stationary(mob,amount);
+            float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
+            if(idle!=null){
+                AdventurerIdle.Blend blend=idleStates.computeIfAbsent(mob,e->new AdventurerIdle.Blend());
+                blend.update(mob.ticksExisted+pt,stationary,normal);
+                double t=AdventurerIdle.phase(blend.elapsed,idle.duration),weight=blend.smooth();
+                for(int i=0;i<4;i++){
+                    if(i<2?!arms:!legs)continue;
+                    applyEdit(limbs[i].upper,UPPER[i],t,weight);
+                    applyEdit(limbs[i].lower,LOWER[i],t,weight);
+                }
+            }
+            // Let the authored knee pose settle before fixing world-space anchors.
+            // The solver targets the authored feet, not the original straight legs.
+            if(legs&&stationary&&(idle==null||idleStates.get(mob).weight>=1))plant(root,mob);
             else states.remove(mob);
         }catch(Exception|LinkageError e){
-            failed=true;states.clear();
+            failed=true;states.clear();idleStates.clear();
             LogManager.getLogger("SRPAnimationUtil").warn("Adventurer Mo' Bends compatibility disabled; using original model",e);
             root.render(scale);return;
         }
@@ -72,13 +93,25 @@ public final class AdventurerRuntime {
             }
         }
     }
-    private boolean canPlant(EntityLivingBase e,float amount)throws Exception{
-        if(!e.onGround||e.isRiding()||e.isInWater()||e.isInLava()||e.deathTime>0||amount>.09F)return false;
-        double dx=e.posX-e.prevPosX,dz=e.posZ-e.prevPosZ;
-        if(dx*dx+dz*dz>.0004)return false;
+    private boolean normalState(EntityLivingBase e)throws Exception{
+        if(!e.onGround||e.isRiding()||e.isInWater()||e.isInLava()||e.deathTime>0||e.isSwingInProgress)return false;
         if(((Number)status.invoke(e)).intValue()!=0)return false;
         float pt=Minecraft.getMinecraft().getRenderPartialTicks();
         return Math.abs(((Number)size.invoke(e)).floatValue()-1F)<.01F&&Math.abs(((Number)flash.invoke(e,pt)).floatValue())<.01F;
+    }
+    private boolean stationary(EntityLivingBase e,float amount){
+        double dx=e.posX-e.prevPosX,dz=e.posZ-e.prevPosZ;
+        return amount<=.09F&&dx*dx+dz*dz<=.0004;
+    }
+    private void applyEdit(ModelRenderer p,String name,double tick,double weight){
+        if(name.isEmpty()||weight<=0)return;
+        idle.evaluate(name,tick,edit);
+        p.rotateAngleX+=(float)Math.toRadians(edit[0]*weight);
+        p.rotateAngleY+=(float)Math.toRadians(edit[1]*weight);
+        p.rotateAngleZ+=(float)Math.toRadians(edit[2]*weight);
+        p.rotationPointX+=(float)(edit[3]*weight);
+        p.rotationPointY+=(float)(edit[4]*weight);
+        p.rotationPointZ+=(float)(edit[5]*weight);
     }
     private void plant(ModelRenderer root,EntityLivingBase mob){
         float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
@@ -94,19 +127,20 @@ public final class AdventurerRuntime {
         Pose torso=child(base,root);
         double[][] natural=new double[2][];
         Pose[] hip=new Pose[2];
-        Rot[] nativeUpper=new Rot[2];
+        Rot[] nativeUpper=new Rot[2],authoredLower=new Rot[2];
         for(int i=0;i<2;i++){
             Limb l=limbs[i+2];
             Pose parent=child(torso,l.parent);
-            hip[i]=parent.child(Rot.identity(),translation(l.original));
-            nativeUpper[i]=rotation(l.original);
-            natural[i]=hip[i].point(nativeUpper[i].apply(add(l.knee,l.foot)));
+            hip[i]=parent.child(Rot.identity(),translation(l.upper));
+            nativeUpper[i]=rotation(l.upper);authoredLower[i]=rotation(l.lower);
+            natural[i]=hip[i].point(nativeUpper[i].apply(add(l.knee,authoredLower[i].apply(l.foot))));
         }
         State state=states.computeIfAbsent(mob,e->new State());
         double[][] targets=state.update(natural,mob.ticksExisted+pt);
         for(int i=0;i<2;i++){
             Limb l=limbs[i+2];
-            Solution result=solve(nativeUpper[i],l.knee,l.foot,hip[i].local(targets[i]));
+            if(len(sub(natural[i],targets[i]))<.001)continue;
+            Solution result=solve(nativeUpper[i],authoredLower[i],l.knee,l.foot,hip[i].local(targets[i]));
             angles(l.upper,result.upper);angles(l.lower,result.lower);
         }
     }
@@ -143,6 +177,20 @@ public final class AdventurerRuntime {
             l.setRotationPoint((float)hinge[0],(float)hinge[1],(float)hinge[2]);
             split(o,box,u,l,knee);
             u.addChild(l);limbs[i]=new Limb(o,p,u,l,slot,hinge,foot);
+        }
+        try{
+            AdventurerIdle candidate=AdventurerIdle.load();
+            Rig rig=new Rig(model);
+            if(!candidate.rig.equals(rig.signature))throw new IllegalArgumentException("Uploaded rig signature differs: "+rig.signature);
+            for(int i=0;i<4;i++)if(!UPPER[i].isEmpty()){
+                final int index=i;
+                if(rig.bones.stream().noneMatch(b->b.name.equals(UPPER[index])&&b.part==limbs[index].original))
+                    throw new IllegalArgumentException("Unexpected authored limb "+UPPER[i]);
+            }
+            idle=candidate;
+            LogManager.getLogger("SRPAnimationUtil").info("Adventurer authored idle loaded from ModelInfPlayer.tbl: four bend joints and two leg yaw edits.");
+        }catch(Exception|LinkageError ex){
+            LogManager.getLogger("SRPAnimationUtil").warn("Authored Adventurer idle unavailable; keeping native split geometry and foot planting",ex);
         }
         LogManager.getLogger("SRPAnimationUtil").info("Adventurer: native Mo' Bends split geometry and stationary foot planting enabled.");
     }
