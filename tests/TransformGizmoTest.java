@@ -11,16 +11,16 @@ public final class TransformGizmoTest {
         near(m.delta(30,4),5);near(m.delta(30,14),0);
         TransformGizmo rot=new TransformGizmo(1,new double[]{10,20,0});
         rot.ring(2,new double[]{2,0,0},new double[]{0,1,0});
-        TransformGizmo.Drag r=new TransformGizmo.Drag(rot,hit(rot,75,20),75,20);
-        near(r.delta(10,52.5),90);near(r.delta(-55,20),90);near(r.delta(10,-12.5),90);
+        TransformGizmo.Drag r=new TransformGizmo.Drag(rot,hit(rot,10+TransformGizmo.RADIUS,20),10+TransformGizmo.RADIUS,20);
+        near(r.delta(10,20+TransformGizmo.RADIUS/2),90);near(r.delta(10-TransformGizmo.RADIUS,20),90);near(r.delta(10,20-TransformGizmo.RADIUS/2),90);
         TransformGizmo edge=new TransformGizmo(1,new double[]{0,0,0});
         edge.ring(0,new double[]{1,0,0},new double[]{0,0,1});
         TransformGizmo.Drag e=new TransformGizmo.Drag(edge,hit(edge,15,0),15,0);
         if(!Double.isFinite(e.delta(20,0)))throw new AssertionError("edge-on rotation");
         TransformGizmo scale=new TransformGizmo(2,new double[]{0,0,0});
         scale.axis(1,new double[]{0,2,0});
-        TransformGizmo.Drag q=new TransformGizmo.Drag(scale,hit(scale,0,65),0,65);
-        near(q.delta(0,130),1);
+        TransformGizmo.Drag q=new TransformGizmo.Drag(scale,hit(scale,0,TransformGizmo.RADIUS),0,TransformGizmo.RADIUS);
+        near(q.delta(0,2*TransformGizmo.RADIUS),1);
         System.out.println("Transform gizmo geometry tests passed");
     }
 }

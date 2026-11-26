@@ -23,6 +23,8 @@ jobs:
           mkdir -p /tmp/srpau-gizmo-test
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/TransformGizmo.java tests/TransformGizmoTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.TransformGizmoTest
+          javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/AdventurerUV.java tests/AdventurerUVTest.java
+          java -cp /tmp/srpau-gizmo-test dev.srpau.AdventurerUVTest
           javac -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/FootPlant.java tests/FootPlantTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.FootPlantTest
       - run: JAVA_HOME="$JAVA_HOME_17_X64" gradle --no-daemon build

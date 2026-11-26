@@ -664,7 +664,7 @@ final class BoneEditor {
                 boolean hovered=gizmoDrag==null&&hover!=null&&hover.handle.axis==a;
                 int c=active||hovered?0xffffdf75:GIZMO_COLORS[a];
                 GlStateManager.color(((c>>16)&255)/255F,((c>>8)&255)/255F,(c&255)/255F,1F);
-                GL11.glLineWidth(active||hovered?3F:1.8F);
+                GL11.glLineWidth(active||hovered?2F:1.25F);
                 GL11.glBegin(GL11.GL_LINE_STRIP);
                 for(double[] v:handle.points)GL11.glVertex3d(v[0],v[1],v[2]+200);
                 GL11.glEnd();
@@ -674,20 +674,20 @@ final class BoneEditor {
                     dx/=n;dy/=n;
                     if(mode==TransformGizmo.MOVE){
                         GL11.glBegin(GL11.GL_TRIANGLES);
-                        GL11.glVertex3d(e[0]+dx*9,e[1]+dy*9,e[2]+200);
-                        GL11.glVertex3d(e[0]-dx*10-dy*6,e[1]-dy*10+dx*6,e[2]+200);
-                        GL11.glVertex3d(e[0]-dx*10+dy*6,e[1]-dy*10-dx*6,e[2]+200);
+                        GL11.glVertex3d(e[0]+dx*4.5,e[1]+dy*4.5,e[2]+200);
+                        GL11.glVertex3d(e[0]-dx*5-dy*3,e[1]-dy*5+dx*3,e[2]+200);
+                        GL11.glVertex3d(e[0]-dx*5+dy*3,e[1]-dy*5-dx*3,e[2]+200);
                         GL11.glEnd();
                     }else{
                         GL11.glBegin(GL11.GL_QUADS);
-                        GL11.glVertex3d(e[0]-5,e[1]-5,e[2]+200);GL11.glVertex3d(e[0]+5,e[1]-5,e[2]+200);
-                        GL11.glVertex3d(e[0]+5,e[1]+5,e[2]+200);GL11.glVertex3d(e[0]-5,e[1]+5,e[2]+200);
+                        GL11.glVertex3d(e[0]-2.5,e[1]-2.5,e[2]+200);GL11.glVertex3d(e[0]+2.5,e[1]-2.5,e[2]+200);
+                        GL11.glVertex3d(e[0]+2.5,e[1]+2.5,e[2]+200);GL11.glVertex3d(e[0]-2.5,e[1]+2.5,e[2]+200);
                         GL11.glEnd();
                     }
                 }
             }
             GlStateManager.color(.9F,.92F,.96F,1F);
-            GL11.glPointSize(4F);GL11.glBegin(GL11.GL_POINTS);
+            GL11.glPointSize(2F);GL11.glBegin(GL11.GL_POINTS);
             GL11.glVertex3d(gizmo.origin[0],gizmo.origin[1],gizmo.origin[2]+200);GL11.glEnd();GL11.glPointSize(1F);
         }finally{
             GL11.glLineWidth(1F);GlStateManager.depthMask(true);GlStateManager.disableDepth();GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
