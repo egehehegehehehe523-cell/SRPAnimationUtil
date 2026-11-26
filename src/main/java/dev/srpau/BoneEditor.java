@@ -211,11 +211,10 @@ final class BoneEditor {
             ArrayList<AnimationComponent> before=copyTrack(clip,id);
             ArrayList<AnimationComponent> track=clip.sets.computeIfAbsent(id,k->new ArrayList<>());
             int prev=0,next=Integer.MAX_VALUE;
-            for(AnimationComponent c:track){
-                if(c.hidden||c.name.equals("Duration")||c.name.equals("End"))continue;
-                for(int t:new int[]{c.startKey,c.startKey+c.length}){
-                    if(t<frame)prev=Math.max(prev,t);if(t>frame)next=Math.min(next,t);
-                }
+            // Offset-only components are instantaneous keys, not one-tick
+            // ramps. Also isolate the active channel from other transforms.
+            for(int t:KeyframeRetime.keys(track,mode)){
+                if(t<frame)prev=Math.max(prev,t);if(t>frame)next=Math.min(next,t);
             }
             // Tabula components accumulate their changes. Add a local correction ramp in/out,
             // leaving the preexisting native curve and all unaffected components intact.

@@ -35,7 +35,8 @@ public final class AdventurerRuntime {
     private boolean walkReported,runReported,walkBlockedReported;
     private ModelRenderer head;
     private Rot headBind;
-    private final List<ModelRenderer> headPath=new ArrayList<>();
+    private PeekPose peek;
+    private final Map<EntityLivingBase,AdventurerIdle.Blend> peekStates=new WeakHashMap<>();
     private final float[] nativeHead=new float[3];
     private boolean headSaved;
     private final List<List<ModelRenderer>> armPaths=new ArrayList<>();
@@ -78,6 +79,13 @@ public final class AdventurerRuntime {
                 gait.update(now,swing,distance,amount,normal,running&&walk.hasRun());
             }else walkStates.remove(mob);
             boolean stationary=normal&&(gait!=null?!gait.moving:stationary(mob,amount));
+            boolean peekEligible=peek!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
+            double peekWeight=0;
+            if(peekEligible){
+                AdventurerIdle.Blend pb=peekStates.computeIfAbsent(mob,x->new AdventurerIdle.Blend());
+                pb.update(now,mob.isSneaking()&&stationary,normal);
+                peekWeight=pb.smooth();
+            }else peekStates.remove(mob);
             if(!walkBlockedReported&&WalkMotion.moving(distance,amount,false)&&(!testWalk||!normal)){
                 walkBlockedReported=true;
                 LogManager.getLogger("SRPAnimationUtil").info("Adventurer walk blocked: clips="+(walk!=null)+", armourEligible="+testWalk+", normal="+normal+", status="+status.invoke(mob)+", ground="+mob.onGround+", swing="+mob.isSwingInProgress);
@@ -110,11 +118,12 @@ public final class AdventurerRuntime {
                 }
                 applyWalk(gait,lookYaw);
             }
-            if(legs&&stationary&&(gait==null||gait.weight==0)&&(!fullIdle||idleStates.get(mob).weight>=1))plant(rootProxy,mob,arms);
+            if(legs&&stationary&&peekWeight==0&&(gait==null||gait.weight==0)&&(!fullIdle||idleStates.get(mob).weight>=1))plant(rootProxy,mob,arms);
             else{states.remove(mob);balances.remove(mob);}
             if(headSaved)applyLook(lookYaw,lookPitch,gait);
+            if(peekWeight>0)peek.apply(peekWeight);
         }catch(Exception|LinkageError e){
-            restorePose();restoreHead();failed=true;states.clear();idleStates.clear();balances.clear();walkStates.clear();
+            if(peek!=null)peek.restore();restorePose();restoreHead();failed=true;states.clear();idleStates.clear();balances.clear();walkStates.clear();
             LogManager.getLogger("SRPAnimationUtil").warn("Adventurer Mo' Bends compatibility disabled; using original model",e);
             root.render(scale);return;
         }
@@ -133,7 +142,7 @@ public final class AdventurerRuntime {
             for(int i=0;i<4;i++)if((swapped&(1<<i))!=0){
                 Limb l=limbs[i];l.parent.childModels.set(l.slot,l.original);
             }
-            restorePose();restoreHead();
+            if(peek!=null)peek.restore();restorePose();restoreHead();
         }
     }
     private boolean normalState(EntityLivingBase e,int parasiteStatus)throws Exception{
@@ -267,20 +276,16 @@ public final class AdventurerRuntime {
         head.rotateAngleX=nativeHead[0];head.rotateAngleY=nativeHead[1];head.rotateAngleZ=nativeHead[2];headSaved=false;
     }
     private void applyLook(float yaw,float pitch,WalkMotion.State gait){
-        // The skull is at the end of the animated spine, with a native -114
-        // degree bind rotation. Do not simply add yaw/pitch in that space.
-        Rot parent=rotation(rootProxy).mul(rotation(torsoCore));
-        for(ModelRenderer part:headPath)parent=parent.mul(rotation(part));
+        // Apply look direction locally. Spine and torso are deliberately
+        // inherited; the authored lean must not be cancelled by head IK.
         Rot authored=headBind.inv().mul(rotation(head));
         if(gait!=null&&gait.weight>0){
             Rot clip=walk.rotation("head",gait.phase,gait.amount,gait.runWeight);
             double[] a=authored.angles(),b=clip.angles();double f=gait.smooth();
             authored=Rot.euler(a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f);
         }
-        // Kumo's head order is pre yaw, pose rotation, post pitch.
-        Rot desired=Rot.euler(0,Math.toRadians(clamp(yaw,-85,85)),0)
-            .mul(authored).mul(Rot.euler(Math.toRadians(clamp(pitch,-90,90)),0,0));
-        angles(head,parent.inv().mul(desired));
+        angles(head,headBind.mul(Rot.euler(0,Math.toRadians(clamp(yaw,-85,85)),0))
+            .mul(authored).mul(Rot.euler(Math.toRadians(clamp(pitch,-90,90)),0,0)));
     }
     private static void blendRotation(ModelRenderer p,Rot target,double w){
         double[] a=target.angles();
@@ -382,8 +387,9 @@ public final class AdventurerRuntime {
         initializeCore(model,root);
         head=(ModelRenderer)model.getClass().getField("head").get(model);
         headBind=Rot.euler(Math.toRadians(-114),0,0); // ModelInfPlayer 1.10.9 constructor
-        if(!path(root,head,headPath))throw new IllegalArgumentException("Missing head chain");
-        headPath.remove(headPath.size()-1);
+        try{peek=new PeekPose(model,torsoCore,limbs[0].upper,limbs[1].upper,limbs[2].upper,limbs[3].upper,
+            limbs[0].lower,limbs[1].lower,limbs[2].lower,limbs[3].lower);}
+        catch(Exception|LinkageError ex){LogManager.getLogger("SRPAnimationUtil").warn("Peek pose unavailable",ex);}
         try{walk=PlayerWalk.load();LogManager.getLogger("SRPAnimationUtil").info("Adventurer: installed Mo' Bends player walk clips loaded.");}
         catch(Exception|LinkageError ex){LogManager.getLogger("SRPAnimationUtil").warn("Player walk unavailable; retaining native SRP walk",ex);}
         LogManager.getLogger("SRPAnimationUtil").info("Adventurer: torso core and stationary foot planting enabled.");
