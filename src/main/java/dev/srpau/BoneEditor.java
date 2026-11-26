@@ -34,6 +34,7 @@ final class BoneEditor {
     private final Set<Node> collapsed=Collections.newSetFromMap(new IdentityHashMap<Node,Boolean>());
     private final List<Control> controls=new ArrayList<>();
     private final ModelBase mesh=new ModelBase(){};
+    private net.minecraft.client.renderer.texture.DynamicTexture upgradedTexture;
     private final GuiTextField name;
     private final GuiTextField[] values=new GuiTextField[3];
     private final GuiTextField[] attachmentFields=new GuiTextField[3];
@@ -103,6 +104,9 @@ final class BoneEditor {
         this.workspace=workspace;projectId=original.identifier;
         project=new Gson().fromJson(original.getAsJson(),ProjectInfo.class);
         project.identifier=projectId;project.bufferedTexture=original.bufferedTexture;
+        if(AdventurerBends.upgrade(project)){
+            dirty=true;status="Added elbow and knee joints; Apply & back to save.";
+        }
         mesh.textureWidth=project.textureWidth;mesh.textureHeight=project.textureHeight;
         for(CubeInfo cube:project.cubes)roots.add(node(cube,0));
         for(CubeGroup group:project.cubeGroups)addGroup(group);
@@ -236,6 +240,7 @@ final class BoneEditor {
     }
     private boolean hasName(String name){for(Animation a:project.anims)if(a.name.equals(name))return true;return false;}
     private void rename(){if(clip!=null&&!name.getText().trim().isEmpty()){clip.name=name.getText().trim();dirty=true;}}
+    void dispose(){if(upgradedTexture!=null){upgradedTexture.deleteGlTexture();upgradedTexture=null;}}
     private void apply(){
         if(!dirty){BoneEditorEvents.close();return;}
         ProjectInfo current=workspace.getOpenProject();
@@ -386,11 +391,11 @@ final class BoneEditor {
         }
         checker();
         renderModel(partial,mx,my);
-        button(left+4,25,27,15,"G",mode==0,()->setMode(0));
-        button(left+34,25,27,15,"R",mode==1,()->setMode(1));
-        button(left+64,25,27,15,"S",mode==2,()->setMode(2));
-        button(left+95,25,29,15,"Fit",false,this::fit);
-        text("Parent",left+129,29,MUTED,right-left-133);
+        button(left+4,25,37,15,"Move",mode==0,()->setMode(0));
+        button(left+44,25,49,15,"Rotate",mode==1,()->setMode(1));
+        button(left+96,25,40,15,"Scale",mode==2,()->setMode(2));
+        button(left+139,25,29,15,"Fit",false,this::fit);
+        text("Parent",left+173,29,MUTED,right-left-177);
         text("RMB orbit | wheel zoom",left+5,bottom-12,MUTED,right-left-10);
         drawTimeline();
         text(status,5,h-11,MUTED,left-10);
@@ -555,7 +560,9 @@ final class BoneEditor {
         double size=Math.min(right-left,bottom-top)*.72/extent*zoom;
         double vx=(left+right)/2D,vy=(top+bottom)/2D;
         Mat view=Mat.translate(vx,vy,0).mul(Mat.scale(size,size,size)).mul(Mat.rx(pitch)).mul(Mat.ry(yaw)).mul(Mat.translate(-cx,-cy,-cz)).mul(projectScale());
-        int texture=workspace.windowTexture.imageId;
+        if(project.bufferedTexture!=null&&project.metadata.contains(AdventurerBends.MARK)&&upgradedTexture==null)
+            upgradedTexture=new net.minecraft.client.renderer.texture.DynamicTexture(project.bufferedTexture);
+        int texture=upgradedTexture!=null?upgradedTexture.getGlTextureId():workspace.windowTexture.imageId;
         boolean textured=texture!=-1;
         int sx=(int)(left*mc.displayWidth/(double)w),sy=(int)((h-bottom)*mc.displayHeight/(double)h);
         int sw=(int)((right-left)*mc.displayWidth/(double)w),sh=(int)((bottom-top)*mc.displayHeight/(double)h);
@@ -648,8 +655,8 @@ final class BoneEditor {
     private static final int[] GIZMO_COLORS={0xffe34d50,0xff85df53,0xff5b83ff};
     private void drawGizmo(int mx,int my){
         if(gizmo==null)return;
-        TransformGizmo.Pick hover=viewport(mx,my)?gizmo.pick(mx,my):null;
-        GlStateManager.disableDepth();GlStateManager.disableTexture2D();
+        TransformGizmo.Pick hover=viewport(mx,my)?visibleGizmo(mx,my):null;
+        GlStateManager.enableDepth();GlStateManager.depthMask(false);GlStateManager.disableTexture2D();
         try{
             for(TransformGizmo.Handle handle:gizmo.handles){
                 int a=handle.axis;
@@ -659,7 +666,7 @@ final class BoneEditor {
                 GlStateManager.color(((c>>16)&255)/255F,((c>>8)&255)/255F,(c&255)/255F,1F);
                 GL11.glLineWidth(active||hovered?3F:1.8F);
                 GL11.glBegin(GL11.GL_LINE_STRIP);
-                for(double[] v:handle.points)GL11.glVertex2d(v[0],v[1]);
+                for(double[] v:handle.points)GL11.glVertex3d(v[0],v[1],v[2]+200);
                 GL11.glEnd();
                 if(mode!=TransformGizmo.ROTATE){
                     double[] o=handle.points[0],e=handle.points[1];
@@ -667,28 +674,34 @@ final class BoneEditor {
                     dx/=n;dy/=n;
                     if(mode==TransformGizmo.MOVE){
                         GL11.glBegin(GL11.GL_TRIANGLES);
-                        GL11.glVertex2d(e[0]+dx*4,e[1]+dy*4);
-                        GL11.glVertex2d(e[0]-dx*7-dy*4,e[1]-dy*7+dx*4);
-                        GL11.glVertex2d(e[0]-dx*7+dy*4,e[1]-dy*7-dx*4);
+                        GL11.glVertex3d(e[0]+dx*9,e[1]+dy*9,e[2]+200);
+                        GL11.glVertex3d(e[0]-dx*10-dy*6,e[1]-dy*10+dx*6,e[2]+200);
+                        GL11.glVertex3d(e[0]-dx*10+dy*6,e[1]-dy*10-dx*6,e[2]+200);
                         GL11.glEnd();
                     }else{
                         GL11.glBegin(GL11.GL_QUADS);
-                        GL11.glVertex2d(e[0]-3,e[1]-3);GL11.glVertex2d(e[0]+3,e[1]-3);
-                        GL11.glVertex2d(e[0]+3,e[1]+3);GL11.glVertex2d(e[0]-3,e[1]+3);
+                        GL11.glVertex3d(e[0]-5,e[1]-5,e[2]+200);GL11.glVertex3d(e[0]+5,e[1]-5,e[2]+200);
+                        GL11.glVertex3d(e[0]+5,e[1]+5,e[2]+200);GL11.glVertex3d(e[0]-5,e[1]+5,e[2]+200);
                         GL11.glEnd();
                     }
                 }
             }
             GlStateManager.color(.9F,.92F,.96F,1F);
             GL11.glPointSize(4F);GL11.glBegin(GL11.GL_POINTS);
-            GL11.glVertex2d(gizmo.origin[0],gizmo.origin[1]);GL11.glEnd();GL11.glPointSize(1F);
+            GL11.glVertex3d(gizmo.origin[0],gizmo.origin[1],gizmo.origin[2]+200);GL11.glEnd();GL11.glPointSize(1F);
         }finally{
-            GL11.glLineWidth(1F);GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
+            GL11.glLineWidth(1F);GlStateManager.depthMask(true);GlStateManager.disableDepth();GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
         }
+    }
+    private TransformGizmo.Pick visibleGizmo(int x,int y){
+        TransformGizmo.Pick p=gizmo.pick(x,y);
+        if(p==null)return null;
+        for(CubeHit cube:hits)if(cube.depthAt(x,y)>p.depth+.15)return null;
+        return p;
     }
     private boolean beginGizmo(int mx,int my){
         if(gizmo==null||selected==null||clip==null)return false;
-        TransformGizmo.Pick pick=gizmo.pick(mx,my);
+        TransformGizmo.Pick pick=visibleGizmo(mx,my);
         if(pick==null)return false;
         if(playing){playing=false;refreshFields();}
         dragOriginalPreview=preview;

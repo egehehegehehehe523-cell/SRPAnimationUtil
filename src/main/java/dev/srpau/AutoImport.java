@@ -62,6 +62,7 @@ public final class AutoImport {
                 clip.append(project);
                 imported++;
             }
+            if(AdventurerBends.upgrade(project))image=project.bufferedTexture;
         }catch(Exception|LinkageError ex){
             LogManager.getLogger("SRPAnimationUtil").warn("Automatic animation import failed for "+id+"; using normal Tabula import",ex);
             ClientHooks.message("Native animation import failed for "+id+"; using standard model importer. See latest.log.");

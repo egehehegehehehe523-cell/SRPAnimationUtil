@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.7 development prototype)
+# SRP Animation Util (0.1.8 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -38,3 +38,6 @@ The Animate toolbar button now uses Tabula's native textured button type with a 
 
 ## Transform gizmos
 G shows red/green/blue parent-space translation arrows, R shows Euler-axis rotation rings at the true joint pivot, and S shows local scale handles. Click and drag a handle to edit its axis; the selected/hovered handle turns gold. The gizmo is drawn over the model, while the cube outline and player attachment preview remain active. Camera changes are blocked during a drag. Auto key is on by default and commits one native Tabula edit when a changed drag is released; disable it and use Set key for manual commits. Escape during dragging restores the starting preview. Rotation uses the projected ring ellipse with a tangent fallback for edge-on views, not an arbitrary horizontal-drag multiplier. No change to the .tbl format or importer. This version implements individual axis handles, not plane or free-rotation handles.
+
+## Adventurer rig and gizmo update
+Gizmos have fixed 65 GUI-pixel radius regardless of zoom, larger arrowheads and scale squares, depth-tested occlusion, and full toolbar names. The Adventurer (ModelInfPlayer) is upgraded automatically on import or opening Animate: four halfway splits using rear elbow and front knee hinges like Mo' Bends. Original joint IDs, sampled tracks, and texture pixels are preserved; UV strips are repacked into additional atlas space using standard Tabula box UVs. Cut faces use the original cap texture. No Mo' Bends dependency is needed for this editor operation. Existing projects are upgraded on a working copy; Apply & back commits. Requires an original texture at the model's declared dimensions and unmodified 4x12x4 limb geometry. This is editor rig support, not yet gameplay rendering, armour integration or world-space foot planting.

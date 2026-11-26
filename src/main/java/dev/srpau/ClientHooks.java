@@ -234,6 +234,7 @@ public final class ClientHooks {
             capture.append(project);
             imported.add(capture);
         }
+        AdventurerBends.upgrade(project);
         if(!appendTo)workspace.openNextNewProject=true;
         Tabula.proxy.tickHandlerClient.mainframe.overrideProject(project.identifier,project.getAsJson(),project.bufferedTexture);
         pending.removeAll(imported);
