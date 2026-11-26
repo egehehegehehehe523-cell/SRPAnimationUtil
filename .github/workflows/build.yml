@@ -33,6 +33,8 @@ jobs:
           java -cp /tmp/srpau-gizmo-test dev.srpau.AuthoredFootTest
           javac -cp /tmp/srpau-gizmo-test -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/JointBridge.java tests/JointBridgeTest.java
           java -cp /tmp/srpau-gizmo-test dev.srpau.JointBridgeTest
+          javac -cp /tmp/srpau-gizmo-test -d /tmp/srpau-gizmo-test src/main/java/dev/srpau/TorsoMotion.java tests/TorsoMotionTest.java
+          java -cp /tmp/srpau-gizmo-test dev.srpau.TorsoMotionTest
       - run: JAVA_HOME="$JAVA_HOME_17_X64" gradle --no-daemon build
       - uses: actions/upload-artifact@v4
         with:

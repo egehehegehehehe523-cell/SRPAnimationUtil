@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.14 development prototype)
+# SRP Animation Util (0.1.15 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -60,3 +60,6 @@ The active idle resource is now adventurer_idle_full.json, compiled from all 94 
 
 ## 0.1.14 elbow rendering correction
 The previous connector used inward-facing triangle winding and omitted faces based on a single vertical separation test. Replace that with a shared four-sided cut-ring bridge, outward winding, two-sided rendering, actual upper/lower inflation, and edge-texel sampling. The existing closed cut caps remain. This is independent of the elbow's Euler channel or world-facing direction; no animation retargeting, hinge relocation or foot solver changes. Runtime UV recovery rounds the original ModelBox face coordinates rather than truncating the non-power-of-two texture. Geometry tests cover positive and negative rotations on all three axes. The bundled full idle resource is unchanged. In-game visual verification remains necessary.
+
+## 0.1.15 torso control and player walk test
+Insert 9004_torsoCore at (0,12,0) below mainbody; all except the two hip branches are reparented with inverse pivot offset. Existing bone IDs and additive animation offsets are unchanged. Existing TBLs migrate once on open/import. Gameplay uses a separate root proxy and torso carrier (original boxes, no change to native hierarchy); stationary foot anchors are unchanged, but torso follows the planted stance with damped yaw, roll and support-foot weight shifts, and pelvis shifts are compensated by the original IK solver. Unarmoured normal walking samples installed Mo' Bends Alpha.3 walk_base, walk_forelegs and walk_swing at limbSwing*0.6662, with swing amount weighting and quaternion interpolation; maps body to torsoCore and retargets arm rotations through actual shoulder parent chains. Four-tick transition, native motion fallback on missing clips or special states; native head/tendril motion remains. No full Kumo driver integration, no imported editor walk clip, no armour changes. Experimental, needs in-game testing.

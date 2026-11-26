@@ -28,6 +28,11 @@ public final class AdventurerRuntime {
     private AdventurerIdle idle;
     private final double[] edit=new double[6];
     private Rig idleRig;
+    private ModelRenderer rootProxy,torsoCore,torsoCarrier;
+    private PlayerWalk walk;
+    private final Map<EntityLivingBase,TorsoMotion.Balance> balances=new WeakHashMap<>();
+    private final Map<EntityLivingBase,AdventurerIdle.Blend> walkStates=new WeakHashMap<>();
+    private final List<List<ModelRenderer>> armPaths=new ArrayList<>();
     private float[][] saved;
     private boolean poseApplied;
     private static final String[] UPPER={"0068_arm","0034_arm_1","0078_leg","0046_leg_1"};
@@ -44,7 +49,7 @@ public final class AdventurerRuntime {
             original=o;parent=p;upper=u;lower=l;this.slot=slot;this.knee=knee;this.foot=foot;
         }
     }
-    public void render(ModelBase model,ModelRenderer root,float scale,Entity entity,float amount){
+    public void render(ModelBase model,ModelRenderer root,float scale,Entity entity,float swing,float amount){
         if(failed||!Loader.isModLoaded("mobends")||!(entity instanceof EntityLivingBase)){
             root.render(scale);return;
         }
@@ -71,10 +76,19 @@ public final class AdventurerRuntime {
                 double t=AdventurerIdle.phase(blend.elapsed,idle.duration),weight=blend.smooth();
                 for(int i=0;i<4;i++)applyAbsolute(limbs[i].lower,LOWER[i],t,weight);
             }
-            if(legs&&stationary&&(!fullIdle||idleStates.get(mob).weight>=1))plant(root,mob);
-            else states.remove(mob);
+            copy(root,rootProxy);
+            torsoCore.rotateAngleX=torsoCore.rotateAngleY=torsoCore.rotateAngleZ=0;
+            boolean testWalk=walk!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
+            double now=mob.ticksExisted+pt;
+            if(testWalk){
+                AdventurerIdle.Blend blend=walkStates.computeIfAbsent(mob,x->new AdventurerIdle.Blend());
+                blend.update(now,normal&&!stationary,normal);
+                if(blend.weight>0)applyWalk(swing*.6662,amount,blend.smooth());
+            }else walkStates.remove(mob);
+            if(legs&&stationary&&(!fullIdle||idleStates.get(mob).weight>=1))plant(rootProxy,mob,arms);
+            else{states.remove(mob);balances.remove(mob);}
         }catch(Exception|LinkageError e){
-            restorePose();failed=true;states.clear();idleStates.clear();
+            restorePose();failed=true;states.clear();idleStates.clear();balances.clear();walkStates.clear();
             LogManager.getLogger("SRPAnimationUtil").warn("Adventurer Mo' Bends compatibility disabled; using original model",e);
             root.render(scale);return;
         }
@@ -88,7 +102,7 @@ public final class AdventurerRuntime {
                 if(l.parent.childModels.get(l.slot)!=l.original)continue;
                 l.parent.childModels.set(l.slot,l.upper);swapped|=1<<i;
             }
-            root.render(scale);
+            rootProxy.render(scale);
         }finally{
             for(int i=0;i<4;i++)if((swapped&(1<<i))!=0){
                 Limb l=limbs[i];l.parent.childModels.set(l.slot,l.original);
@@ -139,7 +153,7 @@ public final class AdventurerRuntime {
         }
         poseApplied=false;
     }
-    private void plant(ModelRenderer root,EntityLivingBase mob){
+    private void plant(ModelRenderer root,EntityLivingBase mob,boolean moveTorso){
         float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
         double yaw=Math.toRadians(mob.prevRenderYawOffset+MathHelper.wrapDegrees(mob.renderYawOffset-mob.prevRenderYawOffset)*pt);
         // Vanilla RenderLivingBase's Y(180-yaw) followed by (-1,-1,1).
@@ -162,12 +176,78 @@ public final class AdventurerRuntime {
             natural[i]=hip[i].point(nativeUpper[i].apply(add(l.knee,authoredLower[i].apply(l.foot))));
         }
         State state=states.computeIfAbsent(mob,e->new State());
-        double[][] targets=state.update(natural,mob.ticksExisted+pt);
+        double now=mob.ticksExisted+pt;
+        double[][] targets=state.update(natural,now);
+        if(moveTorso&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty()){
+            double[] naturalLine=sub(torso.local(natural[1]),torso.local(natural[0]));
+            double[] plantedLine=sub(torso.local(targets[1]),torso.local(targets[0]));
+            double lag=clamp(TorsoMotion.yaw(naturalLine,plantedLine),-Math.toRadians(45),Math.toRadians(45));
+            double side=0,lift=0;
+            if(state.stepping>=0){
+                lift=Math.sin(Math.PI*clamp((now-state.began)/5,0,1));side=(state.stepping==0?1:-1)*lift;
+            }
+            TorsoMotion.Balance balance=balances.computeIfAbsent(mob,x->new TorsoMotion.Balance());
+            balance.update(now,lag,side,lift);
+            torsoCore.rotateAngleY+=(float)balance.yaw;torsoCore.rotateAngleZ+=(float)balance.roll;
+            root.rotationPointX+=(float)balance.shift;root.rotationPointY+=(float)balance.drop;
+            torso=child(base,root);
+            // Recompute hip frames after pelvis translation. Preserve foot targets.
+            for(int i=0;i<2;i++){
+                Limb l=limbs[i+2];
+                hip[i]=child(torso,l.parent).child(Rot.identity(),translation(l.upper));
+                natural[i]=hip[i].point(nativeUpper[i].apply(add(l.knee,authoredLower[i].apply(l.foot))));
+            }
+        }
         for(int i=0;i<2;i++){
             Limb l=limbs[i+2];
             if(len(sub(natural[i],targets[i]))<.001)continue;
             Solution result=solve(nativeUpper[i],authoredLower[i],l.knee,l.foot,hip[i].local(targets[i]));
             angles(l.upper,result.upper);angles(l.lower,result.lower);
+        }
+    }
+    private void applyWalk(double phase,double amount,double weight){
+        blendRotation(torsoCore,walk.rotation("body",phase,amount),weight);
+        rootProxy.rotationPointY+=(float)(walk.bob(phase)*weight);
+        for(int i=0;i<4;i++){
+            String name=i==0?"leftArm":i==1?"rightArm":i==2?"rightLeg":"leftLeg";
+            String lower=i==0?"leftForeArm":i==1?"rightForeArm":i==2?"rightForeLeg":"leftForeLeg";
+            Rot desired=walk.rotation(name,phase,amount);
+            Rot parent=Rot.identity();
+            if(i<2)for(ModelRenderer p:armPaths.get(i))parent=parent.mul(rotation(p));
+            else parent=rotation(limbs[i].parent);
+            blendRotation(limbs[i].upper,parent.inv().mul(desired),weight);
+            blendRotation(limbs[i].lower,walk.rotation(lower,phase,amount),weight);
+        }
+    }
+    private static void blendRotation(ModelRenderer p,Rot target,double w){
+        double[] a=target.angles();
+        p.rotateAngleX=angle(p.rotateAngleX,Math.toDegrees(a[0]),w);
+        p.rotateAngleY=angle(p.rotateAngleY,Math.toDegrees(a[1]),w);
+        p.rotateAngleZ=angle(p.rotateAngleZ,Math.toDegrees(a[2]),w);
+    }
+    private static boolean path(ModelRenderer n,ModelRenderer target,List<ModelRenderer> out){
+        if(n==target)return true;
+        if(n.childModels!=null)for(ModelRenderer child:n.childModels){
+            out.add(child);if(path(child,target,out))return true;out.remove(out.size()-1);
+        }
+        return false;
+    }
+    private void initializeCore(ModelBase model,ModelRenderer root){
+        ModelBase mesh=new ModelBase(){};
+        mesh.textureWidth=model.textureWidth;mesh.textureHeight=model.textureHeight;
+        rootProxy=new ModelRenderer(mesh);torsoCore=new ModelRenderer(mesh);torsoCarrier=new ModelRenderer(mesh);
+        torsoCore.setRotationPoint(0,(float)AdventurerTorso.PIVOT_Y,0);
+        torsoCarrier.setRotationPoint(0,(float)-AdventurerTorso.PIVOT_Y,0);
+        rootProxy.addChild(torsoCore);torsoCore.addChild(torsoCarrier);
+        torsoCarrier.cubeList.addAll(root.cubeList);
+        for(ModelRenderer c:root.childModels){
+            if(c==limbs[2].parent||c==limbs[3].parent)rootProxy.addChild(c);
+            else torsoCarrier.addChild(c);
+        }
+        for(int i=0;i<2;i++){
+            List<ModelRenderer> chain=new ArrayList<>();
+            if(!path(root,limbs[i].parent,chain))throw new IllegalArgumentException("Missing shoulder chain");
+            armPaths.add(chain);
         }
     }
     private static Pose child(Pose p,ModelRenderer r){return p.child(rotation(r),translation(r));}
@@ -236,7 +316,10 @@ public final class AdventurerRuntime {
         }catch(Exception|LinkageError ex){
             LogManager.getLogger("SRPAnimationUtil").warn("Authored Adventurer idle unavailable; keeping native split geometry and foot planting",ex);
         }
-        LogManager.getLogger("SRPAnimationUtil").info("Adventurer: native Mo' Bends split geometry and stationary foot planting enabled.");
+        initializeCore(model,root);
+        try{walk=PlayerWalk.load();LogManager.getLogger("SRPAnimationUtil").info("Adventurer: installed Mo' Bends player walk clips loaded.");}
+        catch(Exception|LinkageError ex){LogManager.getLogger("SRPAnimationUtil").warn("Player walk unavailable; retaining native SRP walk",ex);}
+        LogManager.getLogger("SRPAnimationUtil").info("Adventurer: torso core and stationary foot planting enabled.");
     }
     private static void split(ModelRenderer original,ModelBox source,ModelRenderer upper,ModelRenderer lower,boolean knee)throws Exception{
         Class<?> factory=Class.forName("goblinbob.mobends.core.client.model.BoxFactory");

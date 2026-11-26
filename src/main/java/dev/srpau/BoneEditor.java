@@ -113,7 +113,7 @@ final class BoneEditor {
         project=new Gson().fromJson(original.getAsJson(),ProjectInfo.class);
         project.identifier=projectId;project.bufferedTexture=original.bufferedTexture;
         if(AdventurerBends.upgrade(project)){
-            dirty=true;status="Added elbow and knee joints; Apply & back to save.";
+            dirty=true;status="Updated Adventurer rig; Apply & back to save.";
         }
         mesh.textureWidth=project.textureWidth;mesh.textureHeight=project.textureHeight;
         for(CubeInfo cube:project.cubes)roots.add(node(cube,0));

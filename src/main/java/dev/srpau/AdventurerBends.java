@@ -23,7 +23,7 @@ final class AdventurerBends {
     }
     static boolean upgrade(ProjectInfo p){
         if(p==null||p.metadata==null)return false;
-        if(p.metadata.contains(MARK))return improveSurfaces(p);
+        if(p.metadata.contains(MARK)){boolean a=improveSurfaces(p);boolean c=AdventurerTorso.upgrade(p);return a||c;}
         if(!"ModelInfPlayer".equals(p.modelName)&&!p.metadata.contains("srpau:entity:srparasites:sim_adventurer"))return false;
         if(p.metadata.stream().noneMatch(v->v.startsWith("srpau:rig:")))return skipped("not an imported SRP rig");
         BufferedImage src=p.bufferedTexture;
@@ -75,6 +75,7 @@ final class AdventurerBends {
         p.textureHeight=height;p.bufferedTexture=atlas;p.metadata.add(MARK);
         org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("Adventurer editor bends added: leftElbow, rightElbow, rightKnee, leftKnee; texture atlas "+width+"x"+height);
         improveSurfaces(p);
+        AdventurerTorso.upgrade(p);
         return true;
     }
     /** Preserve the four existing hinge IDs, positions and every authored track.

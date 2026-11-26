@@ -3,7 +3,7 @@
     "modid": "srpanimationutil",
     "name": "SRP Animation Util",
     "description": "Native SRP pose recorder and Tabula animation extension",
-    "version": "0.1.14",
+    "version": "0.1.15",
     "mcversion": "1.12.2",
     "dependencies": [
       "tabula",
