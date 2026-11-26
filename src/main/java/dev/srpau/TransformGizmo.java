@@ -7,7 +7,7 @@ import java.util.List;
  * Pure geometry: no OpenGL, entity, editor or Minecraft dependencies. */
 final class TransformGizmo {
     static final int MOVE=0, ROTATE=1, SCALE=2;
-    static final double RADIUS=32.5;
+    static final double RADIUS=48.75;
     static final int SEGMENTS=64;
     final int mode;
     final double[] origin;
@@ -58,7 +58,7 @@ final class TransformGizmo {
             double t=Math.max(0,Math.min(1,((x-a[0])*dx+(y-a[1])*dy)/len));
             double d=Math.hypot(x-a[0]-t*dx,y-a[1]-t*dy);
             double z=a[2]+t*(b[2]-a[2]);
-            if(d<=5&&(best==null||d<best.distance-.7||(Math.abs(d-best.distance)<=.7&&z>best.depth)))
+            if(d<=8&&(best==null||d<best.distance-.7||(Math.abs(d-best.distance)<=.7&&z>best.depth)))
                 best=new Pick(h,d,z,(i+t)*2*Math.PI/SEGMENTS);
         }
         return best;

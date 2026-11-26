@@ -657,6 +657,7 @@ final class BoneEditor {
         if(gizmo==null)return;
         TransformGizmo.Pick hover=viewport(mx,my)?visibleGizmo(mx,my):null;
         GlStateManager.enableDepth();GlStateManager.depthMask(false);GlStateManager.disableTexture2D();
+        boolean culled=GL11.glIsEnabled(GL11.GL_CULL_FACE);GlStateManager.disableCull();
         try{
             for(TransformGizmo.Handle handle:gizmo.handles){
                 int a=handle.axis;
@@ -664,34 +665,54 @@ final class BoneEditor {
                 boolean hovered=gizmoDrag==null&&hover!=null&&hover.handle.axis==a;
                 int c=active||hovered?0xffffdf75:GIZMO_COLORS[a];
                 GlStateManager.color(((c>>16)&255)/255F,((c>>8)&255)/255F,(c&255)/255F,1F);
-                GL11.glLineWidth(active||hovered?2F:1.25F);
-                GL11.glBegin(GL11.GL_LINE_STRIP);
-                for(double[] v:handle.points)GL11.glVertex3d(v[0],v[1],v[2]+200);
-                GL11.glEnd();
+                drawGizmoStroke(handle.points,active||hovered?5.5:3.5);
                 if(mode!=TransformGizmo.ROTATE){
                     double[] o=handle.points[0],e=handle.points[1];
                     double dx=e[0]-o[0],dy=e[1]-o[1],n=Math.hypot(dx,dy);
                     dx/=n;dy/=n;
                     if(mode==TransformGizmo.MOVE){
                         GL11.glBegin(GL11.GL_TRIANGLES);
-                        GL11.glVertex3d(e[0]+dx*4.5,e[1]+dy*4.5,e[2]+200);
-                        GL11.glVertex3d(e[0]-dx*5-dy*3,e[1]-dy*5+dx*3,e[2]+200);
-                        GL11.glVertex3d(e[0]-dx*5+dy*3,e[1]-dy*5-dx*3,e[2]+200);
+                        GL11.glVertex3d(e[0]+dx*7,e[1]+dy*7,e[2]+200);
+                        GL11.glVertex3d(e[0]-dx*7-dy*5,e[1]-dy*7+dx*5,e[2]+200);
+                        GL11.glVertex3d(e[0]-dx*7+dy*5,e[1]-dy*7-dx*5,e[2]+200);
                         GL11.glEnd();
                     }else{
                         GL11.glBegin(GL11.GL_QUADS);
-                        GL11.glVertex3d(e[0]-2.5,e[1]-2.5,e[2]+200);GL11.glVertex3d(e[0]+2.5,e[1]-2.5,e[2]+200);
-                        GL11.glVertex3d(e[0]+2.5,e[1]+2.5,e[2]+200);GL11.glVertex3d(e[0]-2.5,e[1]+2.5,e[2]+200);
+                        GL11.glVertex3d(e[0]-4,e[1]-4,e[2]+200);GL11.glVertex3d(e[0]+4,e[1]-4,e[2]+200);
+                        GL11.glVertex3d(e[0]+4,e[1]+4,e[2]+200);GL11.glVertex3d(e[0]-4,e[1]+4,e[2]+200);
                         GL11.glEnd();
                     }
                 }
             }
             GlStateManager.color(.9F,.92F,.96F,1F);
-            GL11.glPointSize(2F);GL11.glBegin(GL11.GL_POINTS);
+            GL11.glPointSize(4F);GL11.glBegin(GL11.GL_POINTS);
             GL11.glVertex3d(gizmo.origin[0],gizmo.origin[1],gizmo.origin[2]+200);GL11.glEnd();GL11.glPointSize(1F);
         }finally{
             GL11.glLineWidth(1F);GlStateManager.depthMask(true);GlStateManager.disableDepth();GlStateManager.enableTexture2D();GlStateManager.color(1,1,1,1);
+            if(culled)GlStateManager.enableCull();
         }
+    }
+    private void drawGizmoStroke(double[][] points,double width){
+        // GL line widths are often clamped to one physical pixel; filled
+        // triangles give a reliable GUI-pixel thickness at every GUI scale.
+        boolean culled=GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        GlStateManager.disableCull();
+        try{
+            GL11.glBegin(GL11.GL_TRIANGLES);
+            for(int i=0;i<points.length-1;i++){
+                double[] a=points[i],b=points[i+1];
+                double dx=b[0]-a[0],dy=b[1]-a[1],n=Math.hypot(dx,dy);
+                if(n<1e-8)continue;
+                double ox=-dy/n*width*.5,oy=dx/n*width*.5;
+                GL11.glVertex3d(a[0]+ox,a[1]+oy,a[2]+200);
+                GL11.glVertex3d(a[0]-ox,a[1]-oy,a[2]+200);
+                GL11.glVertex3d(b[0]+ox,b[1]+oy,b[2]+200);
+                GL11.glVertex3d(b[0]+ox,b[1]+oy,b[2]+200);
+                GL11.glVertex3d(a[0]-ox,a[1]-oy,a[2]+200);
+                GL11.glVertex3d(b[0]-ox,b[1]-oy,b[2]+200);
+            }
+            GL11.glEnd();
+        }finally{if(culled)GlStateManager.enableCull();}
     }
     private TransformGizmo.Pick visibleGizmo(int x,int y){
         TransformGizmo.Pick p=gizmo.pick(x,y);

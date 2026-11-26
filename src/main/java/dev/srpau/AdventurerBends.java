@@ -11,6 +11,7 @@ import java.util.*;
  * Tabula box UVs, so even the stock editor and saved TBL can draw the split. */
 final class AdventurerBends {
     static final String MARK="srpau:adventurer-bends:v1";
+    static final String VISUAL_MARK="srpau:adventurer-bend-surfaces:v2";
     private static final String[] PARTS={"arm","arm_1","leg","leg_1"};
     private static final String[] NAMES={"leftElbow","rightElbow","rightKnee","leftKnee"};
     private AdventurerBends(){}
@@ -20,7 +21,8 @@ final class AdventurerBends {
         return false;
     }
     static boolean upgrade(ProjectInfo p){
-        if(p==null||p.metadata==null||p.metadata.contains(MARK))return false;
+        if(p==null||p.metadata==null)return false;
+        if(p.metadata.contains(MARK))return improveSurfaces(p);
         if(!"ModelInfPlayer".equals(p.modelName)&&!p.metadata.contains("srpau:entity:srparasites:sim_adventurer"))return false;
         if(p.metadata.stream().noneMatch(v->v.startsWith("srpau:rig:")))return skipped("not an imported SRP rig");
         BufferedImage src=p.bufferedTexture;
@@ -71,6 +73,51 @@ final class AdventurerBends {
         }
         p.textureHeight=height;p.bufferedTexture=atlas;p.metadata.add(MARK);
         org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("Adventurer editor bends added: leftElbow, rightElbow, rightKnee, leftKnee; texture atlas "+width+"x"+height);
+        improveSurfaces(p);
+        return true;
+    }
+    /** Preserve the four existing hinge IDs, positions and every authored track.
+     * Each segment has a dedicated 16x10 atlas tile. Like the Alpha.3 player,
+     * elbow cut faces are open and knees have a cap sampled from the corresponding
+     * side strip. Very small inflation keeps the overlapping surfaces from fighting. */
+    private static boolean improveSurfaces(ProjectInfo p){
+        if(p.metadata.contains(VISUAL_MARK))return false;
+        BufferedImage src=p.bufferedTexture;
+        if(src==null||src.getWidth()!=p.textureWidth||src.getHeight()!=p.textureHeight)return skipped("split atlas missing");
+        CubeInfo[][] segments=new CubeInfo[4][2];
+        for(CubeInfo joint:p.getAllCubes())for(int i=0;i<4;i++)if(field(joint).equals(PARTS[i])){
+            for(CubeInfo child:joint.getChildren()){
+                if(child.name.contains("#box")&&Arrays.equals(child.dimensions,new int[]{4,6,4}))segments[i][0]=child;
+                if(field(child).equals(NAMES[i]))for(CubeInfo distal:child.getChildren())if(distal.name.contains("#box")&&Arrays.equals(distal.dimensions,new int[]{4,6,4}))segments[i][1]=distal;
+            }
+        }
+        Set<String> tiles=new HashSet<>();
+        for(int i=0;i<4;i++)for(int j=0;j<2;j++){
+            CubeInfo c=segments[i][j];
+            if(c==null)return skipped("missing split segment "+PARTS[i]);
+            int u=c.txOffset[0],v=c.txOffset[1];
+            if(u<0||v<0||u+16>src.getWidth()||v+10>src.getHeight())return skipped("invalid split atlas tile "+PARTS[i]);
+            if(!tiles.add(u+":"+v))return skipped("shared split atlas tile");
+        }
+        BufferedImage atlas=new BufferedImage(src.getWidth(),src.getHeight(),BufferedImage.TYPE_INT_ARGB);
+        copy(src,atlas,0,0,src.getWidth(),src.getHeight(),0,0);
+        for(int i=0;i<4;i++){
+            CubeInfo upper=segments[i][0],lower=segments[i][1];
+            int uu=upper.txOffset[0],uv=upper.txOffset[1],lu=lower.txOffset[0],lv=lower.txOffset[1];
+            if(i<2){
+                // Same internal face visibility as player.json (elbows caps=false).
+                atlas.setRGB(uu+8,uv,4,4,new int[16],0,4);
+                atlas.setRGB(lu+4,lv,4,4,new int[16],0,4);
+                upper.mcScale+=.01D;
+            }else{
+                // BoxSplitter shifts the lower top cap down by six source pixels.
+                // Those pixels already exist in the upper segment\u0027s side strip.
+                copy(src,atlas,uu+4,uv+6,4,4,lu+4,lv);
+                lower.mcScale+=.01D;
+            }
+        }
+        p.bufferedTexture=atlas;p.metadata.add(VISUAL_MARK);
+        org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("Adventurer: updated bend seam surfaces without changing hinge pivots or animation keys.");
         return true;
     }
     private static void copy(BufferedImage src,BufferedImage dest,int x,int y,int w,int h,int dx,int dy){

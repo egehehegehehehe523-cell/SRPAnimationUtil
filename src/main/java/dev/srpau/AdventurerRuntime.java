@@ -157,7 +157,7 @@ public final class AdventurerRuntime {
         for(int i=0;i<6;i++)for(int j=0;j<4;j++)uv[i][j]=face.getField(names[j]).getInt(Array.get(faces,i));
         Method split=splitter.getMethod("split",float[].class,float[].class,float[][].class,int.class,float[].class,int.class,int.class,boolean.class);
         List<?> segments=(List<?>)split.invoke(null,new float[]{source.posX1,source.posY1,source.posZ1},
-            new float[]{source.posX2,source.posY2,source.posZ2},uv,1,new float[]{.5F},2,knee?-1:1,true);
+            new float[]{source.posX2,source.posY2,source.posZ2},uv,1,new float[]{.5F},2,knee?-1:1,knee);
         Constructor<?> fc=face.getConstructor(int.class,int.class,int.class,int.class);
         for(int i=0;i<2;i++){
             Object seg=segments.get(i);Class<?> type=seg.getClass();
@@ -165,12 +165,14 @@ public final class AdventurerRuntime {
             float[][] strips=(float[][])type.getField("faces").get(seg);
             Object arr=Array.newInstance(face,6);
             for(int f=0;f<6;f++){
-                float[] q=(f==2||f==3)?uv[f]:strips[f]; // same cap pixels as editor atlas
+                float[] q=strips[f];
                 Array.set(arr,f,fc.newInstance(Math.round(q[0]),Math.round(q[1]),Math.round(q[2]),Math.round(q[3])));
             }
             Object box=factory.getConstructor(float.class,float.class,float.class,float.class,float.class,float.class,arr.getClass())
                 .newInstance(min[0],min[1],min[2],max[0],max[1],max[2],arr);
-            factory.getField("faceVisibilityFlag").setByte(box,(byte)63);
+            factory.getField("faceVisibilityFlag").setByte(box,(byte)type.getField("visibility").getInt(seg));
+            // Match player.json: tiny X/Z inflation on upper arms and lower legs.
+            if(knee?i==1:i==0)factory.getMethod("inflate",float.class,float.class,float.class).invoke(box,.01F,0F,.01F);
             ModelRenderer part=i==0?upper:lower;
             part.cubeList.add((ModelBox)factory.getMethod("create",ModelRenderer.class).invoke(box,part));
         }
