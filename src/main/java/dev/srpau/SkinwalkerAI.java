@@ -199,6 +199,7 @@ public final class SkinwalkerAI {
         private void passive(int tick){
             mob.setAttackTarget(null);
             java.util.Random rand=mob.getRNG();
+            if(nextSlot==0)nextSlot=tick+40+rand.nextInt(140);
             if(tick>=nextSlot){
                 nextSlot=tick+40+rand.nextInt(140);
                 net.minecraft.nbt.NBTTagList bar=SkinwalkerState.data(mob).getCompoundTag("Identity").getTagList("Hotbar",10);

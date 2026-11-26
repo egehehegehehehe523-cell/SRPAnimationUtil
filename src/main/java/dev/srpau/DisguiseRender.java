@@ -105,7 +105,7 @@ public final class DisguiseRender {
         // Cape interpolation expects the chasing position history. Follow the
         // source rather than letting an unspawned actor retain (0,0,0).
         if(p.lastCapeTick!=e.ticksExisted){p.prevChasingPosX=p.chasingPosX;p.prevChasingPosY=p.chasingPosY;p.prevChasingPosZ=p.chasingPosZ;}
-        if(Math.abs(p.chasingPosX-e.posX)>10||Math.abs(p.chasingPosY-e.posY)>10||Math.abs(p.chasingPosZ-e.posZ)>10){
+        if(p.lastCapeTick<0||Math.abs(p.chasingPosX-e.posX)>10||Math.abs(p.chasingPosY-e.posY)>10||Math.abs(p.chasingPosZ-e.posZ)>10){
             p.prevChasingPosX=p.chasingPosX=e.posX;p.prevChasingPosY=p.chasingPosY=e.posY;p.prevChasingPosZ=p.chasingPosZ=e.posZ;
         }else if(p.lastCapeTick!=e.ticksExisted){
             p.chasingPosX+=(e.posX-p.chasingPosX)*.25;p.chasingPosY+=(e.posY-p.chasingPosY)*.25;p.chasingPosZ+=(e.posZ-p.chasingPosZ)*.25;
