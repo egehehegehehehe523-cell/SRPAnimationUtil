@@ -3,6 +3,7 @@ import net.minecraftforge.common.MinecraftForge;
 /** Keep all Tabula/client class loading out of the dedicated server entry point. */
 final class ClientBootstrap {
     static void receive(SkinwalkerNetwork.Message message){DisguiseRender.receive(message);}
+    static boolean disguised(net.minecraft.entity.EntityLivingBase e){return DisguiseRender.disguised(e);}
     static void init(){
         MinecraftForge.EVENT_BUS.register(new ClientHooks());
         MinecraftForge.EVENT_BUS.register(new BoneEditorEvents());

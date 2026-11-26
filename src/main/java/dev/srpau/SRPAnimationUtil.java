@@ -4,7 +4,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 
-@Mod(modid="srpanimationutil", name="SRP Animation Util", version="0.1.23",
+@Mod(modid="srpanimationutil", name="SRP Animation Util", version="0.1.24",
     acceptedMinecraftVersions="[1.12.2]",
     acceptableRemoteVersions="*", dependencies="after:tabula;after:ichunutil;required-after:srparasites")
 public final class SRPAnimationUtil {
@@ -13,7 +13,8 @@ public final class SRPAnimationUtil {
         SkinwalkerNetwork.init();
         MinecraftForge.EVENT_BUS.register(new SkinwalkerNetwork());
         MinecraftForge.EVENT_BUS.register(new SkinwalkerAI());
+        MinecraftForge.EVENT_BUS.register(new DisguiseControl());
         if(e.getSide().isClient())ClientBootstrap.init();
-        org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("SRP Animation Util 0.1.23 initialized; automatic Tabula import enabled for main-menu and in-world local workspaces.");
+        org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").info("SRP Animation Util 0.1.24 initialized; automatic Tabula import enabled for main-menu and in-world local workspaces.");
     }
 }

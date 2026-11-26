@@ -207,7 +207,7 @@ public final class SkinwalkerAI {
         // Short, purposeful action bouts rather than a continuous mob wander.
         // All item changes are visual only; no interaction or inventory on mob.
         private void passive(int tick){
-            mob.setAttackTarget(null);
+            if(mob.getAttackTarget()!=null)mob.setAttackTarget(null);
             java.util.Random rand=mob.getRNG();
             if(nextSlot==0)nextSlot=tick+40+rand.nextInt(140);
             if(tick>=nextSlot){
@@ -262,6 +262,10 @@ public final class SkinwalkerAI {
             int tick=mob.ticksExisted;
             refreshObservers(tick);
             if(SkinwalkerState.disguised(mob)){passive(tick);return;}
+            if(SkinwalkerState.data(mob).getBoolean("JustRevealed")){
+                SkinwalkerState.data(mob).setBoolean("JustRevealed",false);
+                clear();passiveMode=0;interest=null;safeTicks=0;nextPlan=tick;fleeUntil=tick+40;
+            }
             // A learned identity is permanent. Wait for a genuinely unseen,
             // grounded opportunity after ending the peek, even if target left.
             if(SkinwalkerState.ready(mob)&&!peeking){

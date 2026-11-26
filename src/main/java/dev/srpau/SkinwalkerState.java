@@ -91,7 +91,7 @@ final class SkinwalkerState {
         out.setBoolean("Peek",d.getBoolean("Peek"));
         if(d.getBoolean("Peek"))out.setFloat("PeekYaw",d.getFloat("PeekYaw"));
         out.setBoolean("Disguised",d.getBoolean("Disguised"));
-        if(d.getBoolean("Disguised"))out.setTag("Identity",d.getCompoundTag("Identity").copy());
+        if(d.getBoolean("Disguised")){out.setTag("Identity",d.getCompoundTag("Identity").copy());out.setFloat("Health",DisguiseControl.health(e));out.setInteger("HurtSerial",d.getInteger("HurtSerial"));}
         return out;
     }
     static void peek(EntityLivingBase e,boolean value){peek(e,value,0);}
@@ -105,6 +105,7 @@ final class SkinwalkerState {
     static void disguise(EntityLivingBase e){
         NBTTagCompound d=data(e);if(!ready(e)||disguised(e))return;
         d.setBoolean("Peek",false);d.setBoolean("Disguised",true);
+        d.setFloat("DisguiseHealth",DisguiseVitals.MAX);d.setInteger("RegenDelay",DisguiseVitals.REGEN_DELAY);d.setInteger("HurtCooldown",0);d.setFloat("LastHit",0);
         SkinwalkerNetwork.sync(e);
     }
 }

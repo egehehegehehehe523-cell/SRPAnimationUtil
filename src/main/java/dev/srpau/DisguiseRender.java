@@ -30,8 +30,20 @@ public final class DisguiseRender {
     static void receive(SkinwalkerNetwork.Message m){
         Minecraft mc=Minecraft.getMinecraft();
         mc.addScheduledTask(()->{
-            if(mc.world!=null&&mc.world.provider.getDimension()==m.dimension&&m.state!=null)STATES.put(m.id,m.state);
+            if(mc.world!=null&&mc.world.provider.getDimension()==m.dimension&&m.state!=null){
+                NBTTagCompound old=STATES.put(m.id,m.state);
+                for(Entity e:mc.world.loadedEntityList)if(e instanceof EntityLivingBase&&m.id.equals(e.getUniqueID())){
+                    EntityLivingBase living=(EntityLivingBase)e;
+                    if(m.state.getBoolean("Disguised")){
+                        if(old!=null&&old.getInteger("HurtSerial")!=m.state.getInteger("HurtSerial")){living.hurtTime=10;living.maxHurtTime=10;}
+                    }else PROXIES.remove(living);
+                    break;
+                }
+            }
         });
+    }
+    static boolean disguised(EntityLivingBase e){
+        NBTTagCompound s=STATES.get(e.getUniqueID());return s!=null&&s.getBoolean("Disguised");
     }
     static boolean peeking(EntityLivingBase e){
         NBTTagCompound s=STATES.get(e.getUniqueID());
@@ -106,6 +118,8 @@ public final class DisguiseRender {
         p.swingProgress=e.swingProgress;p.prevSwingProgress=e.prevSwingProgress;
         p.isSwingInProgress=e.isSwingInProgress;p.swingProgressInt=e.swingProgressInt;
         p.hurtTime=e.hurtTime;p.deathTime=e.deathTime;
+        NBTTagCompound state=STATES.get(e.getUniqueID());
+        if(state!=null&&state.hasKey("Health"))p.setHealth(state.getFloat("Health"));
         // Cape interpolation expects the chasing position history. Follow the
         // source rather than letting an unspawned actor retain (0,0,0).
         if(p.lastCapeTick!=e.ticksExisted){p.prevChasingPosX=p.chasingPosX;p.prevChasingPosY=p.chasingPosY;p.prevChasingPosZ=p.chasingPosZ;}

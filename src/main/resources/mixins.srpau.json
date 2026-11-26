@@ -3,6 +3,7 @@
   "minVersion": "0.8",
   "compatibilityLevel": "JAVA_8",
   "package": "dev.srpau.mixin",
+  "mixins": ["DisguiseInfectedMixin", "DisguiseParasiteMixin", "DisguiseAdventurerMixin"],
   "client": [
     "WindowImportMixin",
     "WindowTopDockMixin",
