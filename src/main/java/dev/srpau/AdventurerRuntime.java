@@ -32,7 +32,12 @@ public final class AdventurerRuntime {
     private PlayerWalk walk;
     private final Map<EntityLivingBase,TorsoMotion.Balance> balances=new WeakHashMap<>();
     private final Map<EntityLivingBase,WalkMotion.State> walkStates=new WeakHashMap<>();
-    private boolean walkReported,walkBlockedReported;
+    private boolean walkReported,runReported,walkBlockedReported;
+    private ModelRenderer head;
+    private Rot headBind;
+    private final List<ModelRenderer> headPath=new ArrayList<>();
+    private final float[] nativeHead=new float[3];
+    private boolean headSaved;
     private final List<List<ModelRenderer>> armPaths=new ArrayList<>();
     private float[][] saved;
     private boolean poseApplied;
@@ -50,7 +55,7 @@ public final class AdventurerRuntime {
             original=o;parent=p;upper=u;lower=l;this.slot=slot;this.knee=knee;this.foot=foot;
         }
     }
-    public void render(ModelBase model,ModelRenderer root,float scale,Entity entity,float swing,float amount){
+    public void render(ModelBase model,ModelRenderer root,float scale,Entity entity,float swing,float amount,float lookYaw,float lookPitch){
         if(failed||!Loader.isModLoaded("mobends")||!(entity instanceof EntityLivingBase)){
             root.render(scale);return;
         }
@@ -59,7 +64,10 @@ public final class AdventurerRuntime {
         boolean arms=mob.getItemStackFromSlot(EntityEquipmentSlot.CHEST).isEmpty();
         try{
             if(!initialized){initialize(model,mob);initialized=true;}
-            boolean normal=normalState(mob);
+            int parasiteStatus=((Number)status.invoke(mob)).intValue();
+            boolean normal=normalState(mob,parasiteStatus);
+            boolean running=WalkMotion.pursuitRun(parasiteStatus,mob.isSprinting());
+            if(normal&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty())saveHead();
             double distance=Math.hypot(mob.posX-mob.prevPosX,mob.posZ-mob.prevPosZ);
             boolean testWalk=walk!=null&&arms&&legs&&mob.getItemStackFromSlot(EntityEquipmentSlot.HEAD).isEmpty();
             float pt=MathHelper.clamp(Minecraft.getMinecraft().getRenderPartialTicks(),0F,1F);
@@ -67,7 +75,7 @@ public final class AdventurerRuntime {
             WalkMotion.State gait=null;
             if(testWalk){
                 gait=walkStates.computeIfAbsent(mob,x->new WalkMotion.State());
-                gait.update(now,swing,distance,amount,normal);
+                gait.update(now,swing,distance,amount,normal,running&&walk.hasRun());
             }else walkStates.remove(mob);
             boolean stationary=normal&&(gait!=null?!gait.moving:stationary(mob,amount));
             if(!walkBlockedReported&&WalkMotion.moving(distance,amount,false)&&(!testWalk||!normal)){
@@ -96,12 +104,17 @@ public final class AdventurerRuntime {
                     walkReported=true;
                     LogManager.getLogger("SRPAnimationUtil").info("Adventurer player walk active: native swing="+swing+", raw amount="+amount+", normalized amount="+gait.amount+", distance="+distance);
                 }
-                applyWalk(gait);
+                if(gait.runWeight>0&&!runReported){
+                    runReported=true;
+                    LogManager.getLogger("SRPAnimationUtil").info("Adventurer Mo' Bends sprint active: SRP status="+parasiteStatus+", speed="+distance);
+                }
+                applyWalk(gait,lookYaw);
             }
             if(legs&&stationary&&(gait==null||gait.weight==0)&&(!fullIdle||idleStates.get(mob).weight>=1))plant(rootProxy,mob,arms);
             else{states.remove(mob);balances.remove(mob);}
+            if(headSaved)applyLook(lookYaw,lookPitch,gait);
         }catch(Exception|LinkageError e){
-            restorePose();failed=true;states.clear();idleStates.clear();balances.clear();walkStates.clear();
+            restorePose();restoreHead();failed=true;states.clear();idleStates.clear();balances.clear();walkStates.clear();
             LogManager.getLogger("SRPAnimationUtil").warn("Adventurer Mo' Bends compatibility disabled; using original model",e);
             root.render(scale);return;
         }
@@ -120,12 +133,12 @@ public final class AdventurerRuntime {
             for(int i=0;i<4;i++)if((swapped&(1<<i))!=0){
                 Limb l=limbs[i];l.parent.childModels.set(l.slot,l.original);
             }
-            restorePose();
+            restorePose();restoreHead();
         }
     }
-    private boolean normalState(EntityLivingBase e)throws Exception{
+    private boolean normalState(EntityLivingBase e,int parasiteStatus)throws Exception{
         if(!e.onGround||e.isRiding()||e.isInWater()||e.isInLava()||e.deathTime>0||e.isSwingInProgress)return false;
-        if(((Number)status.invoke(e)).intValue()!=0)return false;
+        if(!WalkMotion.locomotionStatus(parasiteStatus))return false;
         float pt=Minecraft.getMinecraft().getRenderPartialTicks();
         return Math.abs(((Number)size.invoke(e)).floatValue()-1F)<.01F&&Math.abs(((Number)flash.invoke(e,pt)).floatValue())<.01F;
     }
@@ -218,18 +231,22 @@ public final class AdventurerRuntime {
             angles(l.upper,result.upper);angles(l.lower,result.lower);
         }
     }
-    private void applyWalk(WalkMotion.State gait){
-        double phase=gait.phase,amount=gait.amount,weight=gait.smooth();
-        blendRotation(torsoCore,walk.rotation("body",phase,amount),weight);
+    private void applyWalk(WalkMotion.State gait,float lookYaw){
+        double phase=gait.phase,amount=gait.amount,weight=gait.smooth(),run=gait.runWeight;
+        // The original graph adds steering roll before the body clip.
+        double steer=clamp(lookYaw*(-.1-.2*run),-10,10);
+        blendRotation(torsoCore,Rot.euler(0,0,Math.toRadians(steer)).mul(walk.rotation("body",phase,amount,run)),weight);
         // The player knee clips use step interpolation, followed by Kumo's
         // smoothing. Match that distinction instead of snapping 0/45 degrees.
-        gait.updateKnees(walk.rotation("rightForeLeg",phase,amount).angles()[0],
-            walk.rotation("leftForeLeg",phase,amount).angles()[0]);
-        rootProxy.rotationPointY+=(float)(walk.bob(phase)*weight);
+        gait.updateKnees(walk.rotation("rightForeLeg",phase,amount,run).angles()[0],
+            walk.rotation("leftForeLeg",phase,amount,run).angles()[0]);
+        gait.updateElbows(walk.rotation("leftForeArm",phase,amount,run).angles()[0],
+            walk.rotation("rightForeArm",phase,amount,run).angles()[0]);
+        rootProxy.rotationPointY+=(float)(walk.bob(phase,run)*weight);
         for(int i=0;i<4;i++){
             String name=i==0?"leftArm":i==1?"rightArm":i==2?"rightLeg":"leftLeg";
             String lower=i==0?"leftForeArm":i==1?"rightForeArm":i==2?"rightForeLeg":"leftForeLeg";
-            Rot desired=walk.rotation(name,phase,amount);
+            Rot desired=walk.rotation(name,phase,amount,run);
             Rot parent=Rot.identity();
             if(i<2)for(ModelRenderer p:armPaths.get(i))parent=parent.mul(rotation(p));
             else parent=rotation(rootProxy).mul(rotation(limbs[i].parent));
@@ -237,9 +254,33 @@ public final class AdventurerRuntime {
             // measured relative to its upright root. Cancel the SRP tilt in
             // the leg target, leaving the original torso shape intact.
             blendRotation(limbs[i].upper,parent.inv().mul(desired),weight);
-            Rot distal=i>=2?Rot.euler(gait.knee[i-2],0,0):walk.rotation(lower,phase,amount);
+            Rot distal=i>=2?Rot.euler(gait.knee[i-2],0,0):walk.rotation(lower,phase,amount,run);
+            if(i<2&&run>0){double[] a=distal.angles();distal=Rot.euler(a[0]+(gait.elbow[i]-a[0])*run,a[1],a[2]);}
             blendRotation(limbs[i].lower,distal,weight);
         }
+    }
+    private void saveHead(){
+        nativeHead[0]=head.rotateAngleX;nativeHead[1]=head.rotateAngleY;nativeHead[2]=head.rotateAngleZ;headSaved=true;
+    }
+    private void restoreHead(){
+        if(!headSaved)return;
+        head.rotateAngleX=nativeHead[0];head.rotateAngleY=nativeHead[1];head.rotateAngleZ=nativeHead[2];headSaved=false;
+    }
+    private void applyLook(float yaw,float pitch,WalkMotion.State gait){
+        // The skull is at the end of the animated spine, with a native -114
+        // degree bind rotation. Do not simply add yaw/pitch in that space.
+        Rot parent=rotation(rootProxy).mul(rotation(torsoCore));
+        for(ModelRenderer part:headPath)parent=parent.mul(rotation(part));
+        Rot authored=headBind.inv().mul(rotation(head));
+        if(gait!=null&&gait.weight>0){
+            Rot clip=walk.rotation("head",gait.phase,gait.amount,gait.runWeight);
+            double[] a=authored.angles(),b=clip.angles();double f=gait.smooth();
+            authored=Rot.euler(a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f);
+        }
+        // Kumo's head order is pre yaw, pose rotation, post pitch.
+        Rot desired=Rot.euler(0,Math.toRadians(clamp(yaw,-85,85)),0)
+            .mul(authored).mul(Rot.euler(Math.toRadians(clamp(pitch,-90,90)),0,0));
+        angles(head,parent.inv().mul(desired));
     }
     private static void blendRotation(ModelRenderer p,Rot target,double w){
         double[] a=target.angles();
@@ -339,6 +380,10 @@ public final class AdventurerRuntime {
             LogManager.getLogger("SRPAnimationUtil").warn("Authored Adventurer idle unavailable; keeping native split geometry and foot planting",ex);
         }
         initializeCore(model,root);
+        head=(ModelRenderer)model.getClass().getField("head").get(model);
+        headBind=Rot.euler(Math.toRadians(-114),0,0); // ModelInfPlayer 1.10.9 constructor
+        if(!path(root,head,headPath))throw new IllegalArgumentException("Missing head chain");
+        headPath.remove(headPath.size()-1);
         try{walk=PlayerWalk.load();LogManager.getLogger("SRPAnimationUtil").info("Adventurer: installed Mo' Bends player walk clips loaded.");}
         catch(Exception|LinkageError ex){LogManager.getLogger("SRPAnimationUtil").warn("Player walk unavailable; retaining native SRP walk",ex);}
         LogManager.getLogger("SRPAnimationUtil").info("Adventurer: torso core and stationary foot planting enabled.");

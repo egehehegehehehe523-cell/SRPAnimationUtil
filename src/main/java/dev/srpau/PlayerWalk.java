@@ -6,17 +6,30 @@ import java.util.Map;
 import static dev.srpau.FootPlant.*;
 /** Read the installed Mo' Bends Alpha.3's actual biped walk clips. */
 final class PlayerWalk {
-    private static final String PATH="/assets/mobends/bends/animations/biped/";
+    private static final String PATH="/assets/mobends/bends/animations/";
     private static final double[] ID={0,0,0,1};
-    final Clip base,knees,swing;
-    private PlayerWalk(Clip base,Clip knees,Clip swing){this.base=base;this.knees=knees;this.swing=swing;}
-    static PlayerWalk load()throws IOException{return new PlayerWalk(read("walk_base"),read("walk_forelegs"),read("walk_swing"));}
+    final Clip base,knees,swing,runBase,runArms,runSwing;
+    private PlayerWalk(Clip base,Clip knees,Clip swing,Clip runBase,Clip runArms,Clip runSwing){
+        this.base=base;this.knees=knees;this.swing=swing;this.runBase=runBase;this.runArms=runArms;this.runSwing=runSwing;
+    }
+    static PlayerWalk load()throws IOException{
+        Clip base=read("biped/walk_base"),knees=read("biped/walk_forelegs"),swing=read("biped/walk_swing");
+        Clip runBase=null,runArms=null,runSwing=null;
+        try{
+            runBase=read("player/sprint_base");runArms=read("player/sprint_forearms");runSwing=read("player/sprint_swing");
+        }catch(IOException|RuntimeException ex){
+            org.apache.logging.log4j.LogManager.getLogger("SRPAnimationUtil").warn("Sprint clips unavailable; using walk fallback",ex);
+            runBase=runArms=runSwing=null;
+        }
+        return new PlayerWalk(base,knees,swing,runBase,runArms,runSwing);
+    }
+    boolean hasRun(){return runBase!=null;}
     private static InputStream open(String name)throws IOException{
         String path=PATH+name+".json";
         // Forge's active resource manager also supports enabled resource packs.
         try{
             return net.minecraft.client.Minecraft.getMinecraft().getResourceManager()
-                .getResource(new net.minecraft.util.ResourceLocation("mobends","bends/animations/biped/"+name+".json")).getInputStream();
+                .getResource(new net.minecraft.util.ResourceLocation("mobends","bends/animations/"+name+".json")).getInputStream();
         }catch(IOException ignored){}
         InputStream in=PlayerWalk.class.getResourceAsStream(path);
         if(in!=null)return in;
@@ -74,11 +87,27 @@ final class PlayerWalk {
             out.rotation=TorsoMotion.slerp(a.rotation,b.rotation,frac);return out;
         }
     }
-    Rot rotation(String bone,double phase,double amount){
-        Clip c=bone.endsWith("ForeLeg")?knees:base;
-        Rot q=TorsoMotion.quat(c.sample(bone,phase).rotation);
-        if(swing.bones.containsKey(bone))q=q.mul(TorsoMotion.quat(TorsoMotion.slerp(ID,swing.sample(bone,phase).rotation,clamp(amount,0,1))));
+    private double[] rotationQuat(String bone,double phase,double amount,boolean running){
+        Clip main=running?(bone.endsWith("ForeArm")?runArms:runBase):(bone.endsWith("ForeLeg")?knees:base);
+        Clip add=running?runSwing:swing;
+        double[] q=main.sample(bone,phase).rotation;
+        if(add.bones.containsKey(bone))q= multiply(q,TorsoMotion.slerp(ID,add.sample(bone,phase).rotation,clamp(amount,0,1)));
         return q;
     }
-    double bob(double phase){return base.sample("root",phase).position[1];}
+    private static double[] multiply(double[] a,double[] b){
+        return new double[]{a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],
+            a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
+            a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],
+            a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]};
+    }
+    Rot rotation(String bone,double phase,double amount,double runWeight){
+        double[] a=rotationQuat(bone,phase,amount,false);
+        if(!hasRun()||runWeight<=0)return TorsoMotion.quat(a);
+        double[] b=rotationQuat(bone,phase,amount,true);
+        return TorsoMotion.quat(TorsoMotion.slerp(a,b,clamp(runWeight,0,1)));
+    }
+    double bob(double phase,double runWeight){
+        double a=base.sample("root",phase).position[1];
+        return hasRun()?a+(runBase.sample("root",phase).position[1]-a)*runWeight:a;
+    }
 }

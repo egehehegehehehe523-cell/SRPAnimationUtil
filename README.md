@@ -1,4 +1,4 @@
-# SRP Animation Util (0.1.16 development prototype)
+# SRP Animation Util (0.1.17 development prototype)
 
 Minecraft 1.12.2 Forge 14.23.5.2860, Tabula 7.1.0, iChunUtil 7.2.2, SRP 1.10.9. Install alongside these mods, do not replace them. Automatic import uses a single Tabula mixin discovered via the MixinConfigs manifest (Cleanroom/CleanMix or MixinBooter 11+). Client-only. No SRP code or assets are bundled.
 
@@ -66,3 +66,6 @@ Insert 9004_torsoCore at (0,12,0) below mainbody; all except the two hip branche
 
 ## 0.1.16 walk retarget correction
 Reads the active Mo' Bends resource manager, classpath or installed mod jar. Logs first active walk and first movement rejected by state/armour/clip availability. Slow Adventurer movement previously supplied tiny vanilla swing amounts; normalize them with a .65 minimum gait amplitude during actual movement, hysteresis and a 1.5x phase rate for shorter strides. Reproduce the player's stepped knee targets with a one-tick exponential smoothing approximation. Compensate the SRP root pitch when mapping player upper legs. Idle, elbow geometry and stationary foot solver unchanged; planting resumes once the walk has faded out. This uses the actual installed walk clips, not the entire Kumo graph. Normal-state restrictions and armour fallback remain. Needs in-game verification.
+
+## 0.1.17 pursuit sprint and head tracking
+SRP 1.10.9 ModelInfPlayer's ordinary animation branch accepts parasite statuses 0,1,2. EntityAIAttackMeleeStatus sets 1 during ordinary pursuit and 2 during accelerated pursuit. The former status==0 guard mistakenly prevented both locomotion states. For this visual test moving statuses 1 and 2 (or vanilla sprint) select Mo' Bends player sprint_base, sprint_forearms and sprint_swing clips, with native phase coefficient 0.53296 instead of walk's 0.6662, shared phase continuity, three-tick walk/run blending, smoothed forearms and steering roll. Existing 1.5x stride calibration remains. Missing sprint assets fall back to walk. Renderer head yaw/pitch now compose with the authored skull rotation relative to its bind pose and the selected Mo' Bends head clip, then compensate the entire current neck and torso hierarchy, including planted-foot torso lag. Native skull transforms are restored after rendering; helmets and special states retain native head behavior. No changes to movement AI, editor assets, idle resource or elbow geometry. In-game verification required.
